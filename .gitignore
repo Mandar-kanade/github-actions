@@ -63,3 +63,12 @@ test-output/
 # Temporary files
 file-list.txt
 project-structure.txt
+
+# SonarCloud / SonarQube
+.sonar/
+.sonarqube/
+sonar-project.properties
+
+# Code Coverage
+.jacoco/
+jacoco.exec

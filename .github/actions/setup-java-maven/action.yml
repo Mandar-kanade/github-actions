@@ -48,4 +48,6 @@ runs:
       run: |
         echo "✅ Java and Maven cache configured"
         echo "📦 Maven version: $(mvn -version | head -n 1)"
+        echo "🔄 Cache is shared across all workflow jobs"
+        echo "💡 Dependencies downloaded in one job are reused in others"
 

@@ -18,7 +18,8 @@ env:
 
 jobs:
   # ============================================
-  # PARALLEL QUALITY CHECKS (Runs simultaneously)
+  # PHASE 1: FAST QUALITY CHECKS (Parallel)
+  # Run lightweight checks first to fail fast
   # ============================================
   
   lint:
@@ -32,7 +33,7 @@ jobs:
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
       
-      - name: Run Checkstyle
+      - name: Run Checkstyle (standalone)
         run: mvn checkstyle:check -B -q
       
       - name: Upload Checkstyle report
@@ -67,12 +68,15 @@ jobs:
           fi
 
   # ============================================
-  # BUILD AND TEST (Runs after checkout only)
+  # PHASE 2: BUILD AND TEST
+  # Only runs if lint and format pass (fail-fast)
+  # Skips duplicate checkstyle that's bound to validate phase
   # ============================================
   
   build-and-test:
     name: 🔨 Build & Test
     runs-on: ubuntu-latest
+    needs: [lint, format-check]  # Wait for quality checks to pass
     
     steps:
       - name: Checkout code
@@ -81,19 +85,20 @@ jobs:
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
       
-      # Compile once, use for both testing and packaging
-      - name: Compile code
-        run: mvn clean compile test-compile -B
+      # Skip checkstyle validation phase since it already ran in lint job
+      # This prevents duplicate execution during compile/package
+      - name: Compile code (skip duplicate checkstyle)
+        run: mvn clean compile test-compile -Dcheckstyle.skip=true -B
       
       - name: Run tests
-        run: mvn test -B
+        run: mvn test -Dcheckstyle.skip=true -B
       
       - name: Generate test report
         if: always()
         run: mvn surefire-report:report -B
       
-      - name: Build JAR (skip recompile)
-        run: mvn package -DskipTests -Dmaven.compiler.skipMain=true -Dmaven.compiler.skipTest=true -B
+      - name: Build JAR (skip recompile and checkstyle)
+        run: mvn package -DskipTests -Dcheckstyle.skip=true -Dmaven.compiler.skipMain=true -Dmaven.compiler.skipTest=true -B
       
       - name: Upload test results
         if: always()
@@ -129,13 +134,58 @@ jobs:
           ls -lh target/*.jar
 
   # ============================================
+  # PHASE 3: CODE QUALITY ANALYSIS
+  # SonarCloud analysis with code coverage
+  # ============================================
+  
+  sonarcloud:
+    name: 🔬 SonarCloud Analysis
+    runs-on: ubuntu-latest
+    needs: [lint, format-check, build-and-test]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+      
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+      
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      
+      - name: Build and analyze with SonarCloud
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          mvn clean verify sonar:sonar \
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }} \
+            -Dcheckstyle.skip=true \
+            -B
+      
+      - name: Upload SonarCloud results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarcloud-results
+          path: target/sonar/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ============================================
   # QUALITY GATE (Waits for all jobs)
   # ============================================
   
   quality-gate:
     name: 📊 Quality Gate
     runs-on: ubuntu-latest
-    needs: [lint, format-check, build-and-test]
+    needs: [lint, format-check, build-and-test, sonarcloud]
     if: always()
     
     steps:
@@ -144,12 +194,14 @@ jobs:
           lint_status="${{ needs.lint.result }}"
           format_status="${{ needs.format-check.result }}"
           build_test_status="${{ needs.build-and-test.result }}"
+          sonar_status="${{ needs.sonarcloud.result }}"
           
           echo "🔍 Lint: $lint_status"
           echo "📐 Format: $format_status"
           echo "🔨 Build & Test: $build_test_status"
+          echo "🔬 SonarCloud: $sonar_status"
           
-          if [ "$lint_status" == "failure" ] || [ "$format_status" == "failure" ] || [ "$build_test_status" == "failure" ]; then
+          if [ "$lint_status" == "failure" ] || [ "$format_status" == "failure" ] || [ "$build_test_status" == "failure" ] || [ "$sonar_status" == "failure" ]; then
             echo "❌ Quality gate failed!"
             exit 1
           fi
@@ -172,11 +224,13 @@ jobs:
           echo "| 🔍 Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📐 Format Check | ${{ needs.format-check.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔨 Build & Test | ${{ needs.build-and-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔬 SonarCloud | ${{ needs.sonarcloud.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ needs.lint.result }}" == "success" ] && \
              [ "${{ needs.format-check.result }}" == "success" ] && \
-             [ "${{ needs.build-and-test.result }}" == "success" ]; then
+             [ "${{ needs.build-and-test.result }}" == "success" ] && \
+             [ "${{ needs.sonarcloud.result }}" == "success" ]; then
             echo "## ✅ All checks passed!" >> $GITHUB_STEP_SUMMARY
           else
             echo "## ❌ Some checks failed!" >> $GITHUB_STEP_SUMMARY

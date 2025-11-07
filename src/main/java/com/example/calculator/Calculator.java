@@ -14,7 +14,7 @@ public class Calculator {
      * Constructor initializes the calculator.
      */
     public Calculator() {
-            this.miResultCount = 0;
+        this.miResultCount = 0;
         this.lstrLastResult = 0.0;
     }
 
@@ -27,8 +27,7 @@ public class Calculator {
      *            the second number
      * @return the sum of the two numbers
      */
-    public double add(double pFirstNumber, double pSecondNumber) 
-    {
+    public double add(double pFirstNumber, double pSecondNumber) {
         double result = pFirstNumber + pSecondNumber;
         updateResult(result);
         return result;
