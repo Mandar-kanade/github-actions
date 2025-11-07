@@ -11,3 +11,19 @@ jobs:
                   run: |
                     node -v
                     npm -v
+
+    parallel-jobs:
+      runs-on: macos-latest
+      steps:
+        - name: Run a script
+          run: |
+            echo "Hello world 2"
+
+    dependent-jobs:
+      runs-on: macos-latest
+      needs: [run-shell-commands, parallel-jobs]
+      steps:
+        - name: Run a script
+          run: |
+            echo "Hello world 3"
+      
