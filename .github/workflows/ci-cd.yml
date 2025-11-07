@@ -165,8 +165,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           mvn clean verify sonar:sonar \
-            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-            -Dsonar.organization=${SONAR_ORG_KEY} \
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }} \
             -Dcheckstyle.skip=true \
             -B
       
