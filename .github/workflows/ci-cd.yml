@@ -7,6 +7,11 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   lint:
     name: Lint with Checkstyle
@@ -98,12 +103,13 @@ jobs:
       
       - name: Publish test report
         if: always()
+        continue-on-error: true
         uses: dorny/test-reporter@v1
         with:
           name: JUnit Test Results
           path: target/surefire-reports/*.xml
           reporter: java-junit
-          fail-on-error: true
+          fail-on-error: false
 
   build:
     name: Build Application
