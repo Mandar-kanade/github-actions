@@ -2,9 +2,19 @@ name: Java Calculator CI/CD
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: 
+      - main
+      - develop
+      - 'feature/**'
+      - 'release/**'
+      - 'hotfix/**'
   pull_request:
-    branches: [ main, develop ]
+    branches: 
+      - main
+      - develop
+      - 'feature/**'
+      - 'release/**'
+      - 'hotfix/**'
   workflow_dispatch:
 
 permissions:
@@ -85,20 +95,10 @@ jobs:
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
       
-      # Skip checkstyle validation phase since it already ran in lint job
-      # This prevents duplicate execution during compile/package
-      - name: Compile code (skip duplicate checkstyle)
-        run: mvn clean compile test-compile -Dcheckstyle.skip=true -B
-      
-      - name: Run tests
-        run: mvn test -Dcheckstyle.skip=true -B
-      
-      - name: Generate test report
-        if: always()
-        run: mvn surefire-report:report -B
-      
-      - name: Build JAR (skip recompile and checkstyle)
-        run: mvn package -DskipTests -Dcheckstyle.skip=true -Dmaven.compiler.skipMain=true -Dmaven.compiler.skipTest=true -B
+      # Optimized: Run clean, compile, test, and package in a single Maven invocation
+      # This leverages Maven's reactor and avoids duplicate dependency resolution
+      - name: Build and test (optimized single pass)
+        run: mvn clean verify -Dcheckstyle.skip=true -B
       
       - name: Upload test results
         if: always()

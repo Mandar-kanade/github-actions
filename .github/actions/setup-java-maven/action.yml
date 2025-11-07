@@ -1,5 +1,5 @@
 name: 'Setup Java with Maven Cache'
-description: 'Sets up JDK 11 with comprehensive Maven caching for faster builds'
+description: 'Sets up JDK with proper Maven dependency caching for faster builds'
 
 inputs:
   java-version:
@@ -14,40 +14,19 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up JDK
+    - name: Set up JDK with Maven cache
       uses: actions/setup-java@v4
       with:
         java-version: ${{ inputs.java-version }}
         distribution: ${{ inputs.java-distribution }}
         cache: 'maven'
     
-    # Additional Maven local repository caching for faster dependency resolution
-    - name: Cache Maven dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.m2/repository
-          ~/.m2/wrapper
-        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          ${{ runner.os }}-maven-
-    
-    # Cache Maven build output for incremental builds
-    - name: Cache Maven build
-      uses: actions/cache@v4
-      with:
-        path: |
-          target
-          **/target
-        key: ${{ runner.os }}-maven-build-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-maven-build-
-    
     - name: Display cache info
       shell: bash
       run: |
         echo "✅ Java and Maven cache configured"
         echo "📦 Maven version: $(mvn -version | head -n 1)"
-        echo "🔄 Cache is shared across all workflow jobs"
-        echo "💡 Dependencies downloaded in one job are reused in others"
+        echo "🔄 Maven dependencies are cached at ~/.m2/repository"
+        echo "💡 Cache is shared across all workflow jobs"
+        echo "🔑 Cache key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}"
 
