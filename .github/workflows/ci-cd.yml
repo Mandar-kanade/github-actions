@@ -77,6 +77,36 @@ jobs:
             echo "✅ Code formatting check passed!"
           fi
 
+  check-cache:
+    name: 🧩 Check Maven Cache
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+
+      - name: Check Maven cache contents
+        shell: bash
+        run: |
+          echo "🔍 Checking Maven cache..."
+          if [ -d ~/.m2/repository ]; then
+            echo "✅ Maven cache directory exists."
+            echo "📦 Cache size:"
+            du -sh ~/.m2/repository
+            echo ""
+            echo "📁 Total cached files:"
+            find ~/.m2/repository | wc -l
+            echo ""
+            echo "🔑 Cache key used: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}"
+          else
+            echo "❌ Cache not found!"
+          fi
+
+      - name: Display Maven version
+        run: mvn -v
   # ============================================
   # PHASE 2: BUILD AND TEST
   # Only runs if lint and format pass (fail-fast)
