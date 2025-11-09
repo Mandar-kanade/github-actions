@@ -31,7 +31,7 @@
       },
       {
         "matchManagers": ["maven", "gradle"],
-        "matchConfidenceLevels": ["high"],
+        "matchDepTypes": ["dependencies"],
         "labels": ["security", "vulnerability"],
         "description": "Prioritize known vulnerable packages"
       }
