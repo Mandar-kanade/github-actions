@@ -176,6 +176,11 @@ jobs:
     name: 🔬 CodeQL Analysis
     runs-on: ubuntu-latest
     needs: [build-and-test]
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+      actions: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
