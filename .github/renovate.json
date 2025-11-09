@@ -5,8 +5,7 @@
       ":semanticCommits",
       ":dependencyDashboard",
       ":automergeMinor",
-      ":maintainLockFilesWeekly",
-      "security:patch"
+      ":maintainLockFilesWeekly"
     ],
   
     "enabledManagers": ["maven", "gradle", "github-actions"],
