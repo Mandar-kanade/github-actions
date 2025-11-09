@@ -23,3 +23,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           # optional: specify config file
           configurationFile: .github/renovate.json
+        env:
+          RENOVATE_REPOSITORIES: mandar-kanade/github-actions
+          LOG_LEVEL: info
