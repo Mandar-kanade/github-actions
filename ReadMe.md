@@ -1,15 +1,19 @@
-# Calculator Maven Project
+# Product Service - Spring Boot RESTful API
 
-A sample Java Maven calculator project demonstrating CI/CD practices with GitHub Actions, JUnit 5 testing, and custom code quality standards.
+A Spring Boot 3.x RESTful web service for managing products with H2 in-memory database, demonstrating CI/CD practices with GitHub Actions, comprehensive testing, and custom code quality standards.
 
 ## 🎯 Project Overview
 
-This project is designed to showcase:
-- **Java Maven Project Structure**: Standard Maven project layout
-- **JUnit 5 Testing**: Comprehensive test suite with nested tests and parameterized tests
+This project showcases:
+- **Spring Boot 3.x**: Modern Spring Boot RESTful web service
+- **Java 17**: Latest LTS Java version
+- **JPA & Hibernate**: Database persistence with H2 in-memory database
+- **REST API**: Full CRUD operations with JSON support
+- **Comprehensive Testing**: Unit tests with JUnit 5 & Mockito, integration tests with MockMvc
 - **GitHub Actions CI/CD**: Automated pipeline for linting, formatting, testing, and building
-- **Custom Coding Standards**: Enforced via Checkstyle with custom naming conventions
+- **Custom Coding Standards**: Enforced via Checkstyle
 - **Code Formatting**: Automated code formatting checks
+- **CORS Enabled**: Configured for cross-origin requests
 
 ## 📋 Table of Contents
 
@@ -17,62 +21,86 @@ This project is designed to showcase:
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
+- [API Endpoints](#api-endpoints)
 - [Running Tests](#running-tests)
 - [Code Quality](#code-quality)
 - [CI/CD Pipeline](#cicd-pipeline)
 - [Coding Conventions](#coding-conventions)
 - [Maven Commands](#maven-commands)
+- [H2 Console Access](#h2-console-access)
 
 ## ✨ Features
 
-### Calculator Operations
-- Addition
-- Subtraction
-- Multiplication
-- Division (with zero-division handling)
-- Power calculation
-- Square root (with negative number handling)
-- Operation tracking and state management
+### Product Management REST API
+- **GET /api/products** - Retrieve all products
+- **GET /api/products/{id}** - Retrieve product by ID
+- **POST /api/products** - Create new product
+- **PUT /api/products/{id}** - Update existing product
+- **DELETE /api/products/{id}** - Delete product
+
+### Product Entity Fields
+- `id` (Long) - Auto-generated unique identifier
+- `name` (String) - Product name (required)
+- `category` (String) - Product category (required)
+- `price` (Double) - Product price (required, >= 0)
+- `stock` (Integer) - Stock quantity (required, >= 0)
 
 ### Testing
-- 35+ JUnit 5 test cases
-- Nested test classes for organized test structure
-- Parameterized tests for comprehensive coverage
-- Exception testing
-- Integration tests
+- **Unit Tests**: Service layer tests using JUnit 5 and Mockito
+- **Integration Tests**: Controller tests using @SpringBootTest and MockMvc
+- Validates CRUD operations and request/response behavior
+- Tests against in-memory H2 database
+
+### Technical Features
+- Spring Boot 3.2.0 with Java 17
+- H2 in-memory database with console access
+- JPA/Hibernate with automatic schema generation
+- Bean validation for entity fields
+- CORS enabled for all origins
+- JSON request/response format
+- Comprehensive error handling
 
 ## 📁 Project Structure
 
 ```
-github-actions/                       # Project root
+github-actions/
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml                 # GitHub Actions workflow
 ├── src/
 │   ├── main/
-│   │   └── java/
-│   │       └── com/example/calculator/
-│   │           └── Calculator.java   # Main calculator class
+│   │   ├── java/
+│   │   │   └── com/example/productservice/
+│   │   │       ├── ProductServiceApplication.java    # Main application
+│   │   │       ├── entity/
+│   │   │       │   └── Product.java                  # Product entity
+│   │   │       ├── repository/
+│   │   │       │   └── ProductRepository.java        # JPA repository
+│   │   │       ├── service/
+│   │   │       │   └── ProductService.java           # Business logic
+│   │   │       ├── controller/
+│   │   │       │   └── ProductController.java        # REST endpoints
+│   │   │       └── config/
+│   │   │           └── CorsConfig.java               # CORS configuration
+│   │   └── resources/
+│   │       └── application.properties                # Application config
 │   └── test/
 │       └── java/
-│           └── com/example/calculator/
-│               └── CalculatorTest.java # JUnit 5 tests
+│           └── com/example/productservice/
+│               ├── service/
+│               │   └── ProductServiceTest.java       # Unit tests
+│               └── controller/
+│                   └── ProductControllerIntegrationTest.java  # Integration tests
 ├── checkstyle.xml                    # Checkstyle configuration
 ├── formatter-config.xml              # Code formatter configuration
 ├── pom.xml                           # Maven configuration
-├── .gitignore                        # Git ignore rules
 ├── README.md                         # This file
-├── QUICK_START.md                    # Quick start guide
-├── ARCHITECTURE.md                   # Architecture documentation
-├── CONTRIBUTING.md                   # Contributing guidelines
-├── PROJECT_SUMMARY.md                # Project summary
-├── setup-and-test.bat                # Windows setup script
-└── setup-and-test.sh                 # Linux/Mac setup script
+└── CONTRIBUTING.md                   # Contributing guidelines
 ```
 
 ## 🔧 Prerequisites
 
-- **Java**: JDK 11 or higher
+- **Java**: JDK 17 or higher
 - **Maven**: 3.6.0 or higher
 - **Git**: For version control
 
@@ -99,10 +127,45 @@ cd github-actions
 mvn clean install
 ```
 
-### 3. Run the Tests
+### 3. Run the Application
 
 ```bash
-mvn test
+mvn spring-boot:run
+```
+
+The application will start on `http://localhost:8080`
+
+## 🌐 API Endpoints
+
+Base URL: `http://localhost:8080/api/products`
+
+### Get All Products
+```bash
+curl -X GET http://localhost:8080/api/products
+```
+
+### Get Product by ID
+```bash
+curl -X GET http://localhost:8080/api/products/1
+```
+
+### Create New Product
+```bash
+curl -X POST http://localhost:8080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Laptop","category":"Electronics","price":999.99,"stock":10}'
+```
+
+### Update Product
+```bash
+curl -X PUT http://localhost:8080/api/products/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Gaming Laptop","category":"Electronics","price":1499.99,"stock":5}'
+```
+
+### Delete Product
+```bash
+curl -X DELETE http://localhost:8080/api/products/1
 ```
 
 ## 🧪 Running Tests
@@ -113,16 +176,16 @@ mvn test
 mvn test
 ```
 
-### Run Specific Test Class
+### Run Unit Tests Only
 
 ```bash
-mvn test -Dtest=CalculatorTest
+mvn test -Dtest=ProductServiceTest
 ```
 
-### Run Specific Test Method
+### Run Integration Tests Only
 
 ```bash
-mvn test -Dtest=CalculatorTest#testAddPositiveNumbers
+mvn test -Dtest=ProductControllerIntegrationTest
 ```
 
 ### Generate Test Report
@@ -132,6 +195,16 @@ mvn surefire-report:report
 ```
 
 The report will be available at: `target/site/surefire-report.html`
+
+### Test Coverage
+
+Generate JaCoCo code coverage report:
+
+```bash
+mvn clean test jacoco:report
+```
+
+Report location: `target/site/jacoco/index.html`
 
 ## 🎨 Code Quality
 
@@ -159,7 +232,7 @@ mvn formatter:format
 
 ## 🔄 CI/CD Pipeline
 
-The GitHub Actions workflow (`ci-cd.yml`) includes four main jobs:
+The GitHub Actions workflow (`ci-cd.yml`) includes:
 
 ### 1. **Lint Job**
 - Runs Checkstyle validation
@@ -169,13 +242,11 @@ The GitHub Actions workflow (`ci-cd.yml`) includes four main jobs:
 ### 2. **Format Check Job**
 - Validates code formatting
 - Ensures consistent code style
-- Runs independently of lint job
 
 ### 3. **Test Job**
-- Executes all JUnit 5 tests
+- Executes all JUnit 5 tests (unit + integration)
 - Generates test reports
 - Uploads test results as artifacts
-- Publishes test report summaries
 - Only runs if lint and format checks pass
 
 ### 4. **Build Job**
@@ -187,7 +258,6 @@ The GitHub Actions workflow (`ci-cd.yml`) includes four main jobs:
 ### 5. **Code Quality Report Job**
 - Aggregates results from all jobs
 - Generates summary report
-- Runs regardless of other job outcomes
 
 ### Pipeline Trigger Events
 
@@ -205,26 +275,19 @@ Must start with one of these prefixes:
 - `mstr` - Member string variables (e.g., `mstrName`)
 - `mi` - Member integer variables (e.g., `miCount`)
 - `mb` - Member boolean variables (e.g., `mbActive`)
-- `lstr` - Local string variables (e.g., `lstrLastResult`)
+- `lstr` - Local string/double variables (e.g., `lstrLastResult`)
 - `li` - Local integer variables (e.g., `liIndex`)
 - `lb` - Local boolean variables (e.g., `lbValid`)
-
-**Example:**
-```java
-private int miResultCount;
-private double lstrLastResult;
-private boolean mbEnabled;
-```
 
 ### Parameter Names
 Must start with lowercase `p` followed by uppercase letter:
 - `pFirstNumber`
-- `pSecondNumber`
-- `pResult`
+- `pProduct`
+- `pId`
 
 **Example:**
 ```java
-public double add(double pFirstNumber, double pSecondNumber) {
+public Product addProduct(Product pProduct) {
     // implementation
 }
 ```
@@ -232,12 +295,12 @@ public double add(double pFirstNumber, double pSecondNumber) {
 ### Method Names
 - Lowercase first letter
 - CamelCase for subsequent words
-- Example: `calculateSum`, `getResult`, `isValid`
+- Example: `getAllProducts`, `getProductById`, `addProduct`
 
 ### Class Names
 - Uppercase first letter
 - CamelCase
-- Example: `Calculator`, `CalculatorTest`
+- Example: `Product`, `ProductService`, `ProductController`
 
 ## 🛠 Maven Commands
 
@@ -252,6 +315,9 @@ mvn clean package -DskipTests
 
 # Install to local repository
 mvn clean install
+
+# Run the application
+mvn spring-boot:run
 ```
 
 ### Testing Commands
@@ -283,31 +349,80 @@ mvn formatter:validate
 mvn formatter:format
 ```
 
-### Reporting Commands
+## 💾 H2 Console Access
 
-```bash
-# Generate all reports
-mvn site
+The H2 database console is available at: `http://localhost:8080/h2-console`
 
-# Generate test report only
-mvn surefire-report:report
+**Connection Details:**
+- **JDBC URL**: `jdbc:h2:mem:productdb`
+- **Username**: `sa`
+- **Password**: (leave empty)
+
+## 📊 Response Formats
+
+### Success Responses
+
+**GET /api/products**
+```json
+[
+  {
+    "id": 1,
+    "name": "Laptop",
+    "category": "Electronics",
+    "price": 999.99,
+    "stock": 10
+  }
+]
 ```
 
-## 📊 Test Coverage
+**POST /api/products** - Status: 201 Created
+```json
+{
+  "id": 1,
+  "name": "Laptop",
+  "category": "Electronics",
+  "price": 999.99,
+  "stock": 10
+}
+```
 
-The test suite includes:
-- **Addition Tests**: 4 tests (including parameterized)
-- **Subtraction Tests**: 3 tests (including parameterized)
-- **Multiplication Tests**: 4 tests (including parameterized)
-- **Division Tests**: 4 tests (including parameterized)
-- **Power Tests**: 4 tests (including parameterized)
-- **Square Root Tests**: 4 tests (including parameterized)
-- **State Management Tests**: 3 tests
-- **Integration Tests**: 2 tests
+**PUT /api/products/{id}** - Status: 200 OK
+```json
+{
+  "id": 1,
+  "name": "Gaming Laptop",
+  "category": "Electronics",
+  "price": 1499.99,
+  "stock": 5
+}
+```
 
-**Total: 28+ test cases** (more with parameterized test variations)
+**DELETE /api/products/{id}** - Status: 204 No Content
+
+### Error Responses
+
+**404 Not Found**
+```
+Product not found
+```
+
+**400 Bad Request**
+```json
+{
+  "timestamp": "2024-01-01T12:00:00.000+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed"
+}
+```
 
 ## 🐛 Troubleshooting
+
+### Application Won't Start
+
+1. Ensure Java 17 is installed: `java -version`
+2. Check if port 8080 is available
+3. Verify Maven dependencies: `mvn dependency:resolve`
 
 ### Checkstyle Failures
 
@@ -328,7 +443,7 @@ If format validation fails:
 If tests fail:
 1. Check test output in console
 2. Review test reports at `target/surefire-reports/`
-3. Ensure Calculator implementation matches test expectations
+3. Verify H2 database configuration
 
 ## 📝 Contributing
 
@@ -352,12 +467,13 @@ For issues or questions:
 
 ## 🎓 Learning Resources
 
-- [Maven Documentation](https://maven.apache.org/guides/)
+- [Spring Boot Documentation](https://spring.io/projects/spring-boot)
+- [Spring Data JPA](https://spring.io/projects/spring-data-jpa)
 - [JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/)
+- [Mockito Documentation](https://site.mockito.org/)
+- [Maven Documentation](https://maven.apache.org/guides/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Checkstyle Documentation](https://checkstyle.org/)
 
 ---
 
 **Happy Coding! 🚀**
-

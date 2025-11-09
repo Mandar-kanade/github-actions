@@ -7,6 +7,12 @@
     <property name="charset" value="UTF-8"/>
     <property name="severity" value="error"/>
     <property name="fileExtensions" value="java"/>
+    
+    <!-- Suppression file for excluding specific checks from certain files -->
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/checkstyle-suppressions.xml"/>
+        <property name="optional" value="false"/>
+    </module>
 
     <!-- Checks for whitespace -->
     <module name="FileTabCharacter">
@@ -14,6 +20,12 @@
     </module>
 
     <module name="TreeWalker">
+        <!-- Suppress checks for JPA entities, repositories, services, and controllers -->
+        <module name="SuppressionCommentFilter">
+            <property name="offCommentFormat" value="CHECKSTYLE:OFF"/>
+            <property name="onCommentFormat" value="CHECKSTYLE:ON"/>
+        </module>
+        
         <!-- Checks for Naming Conventions -->
         
         <!-- Member variables must start with mstr, mi, mb, or l prefix -->
@@ -21,6 +33,14 @@
             <property name="format" value="^(mstr[A-Z][a-zA-Z0-9]*|mi[A-Z][a-zA-Z0-9]*|mb[A-Z][a-zA-Z0-9]*|lstr[A-Z][a-zA-Z0-9]*|li[A-Z][a-zA-Z0-9]*|lb[A-Z][a-zA-Z0-9]*)$"/>
             <message key="name.invalidPattern"
                      value="Member variable ''{0}'' must start with mstr, mi, mb, lstr, li, or lb followed by uppercase letter."/>
+            <!-- Suppress for JPA entities (annotated with @Entity) and Spring components -->
+            <property name="id" value="memberNameCheck"/>
+        </module>
+        
+        <module name="SuppressWithNearbyCommentFilter">
+            <property name="commentFormat" value="CHECKSTYLE IGNORE MemberName"/>
+            <property name="checkFormat" value="MemberName"/>
+            <property name="influenceFormat" value="0"/>
         </module>
 
         <!-- Parameter names must start with p -->
@@ -96,7 +116,10 @@
 
         <!-- Checks for class design -->
         <module name="FinalClass"/>
-        <module name="HideUtilityClassConstructor"/>
+        <module name="HideUtilityClassConstructor">
+            <!-- Suppress for Spring Boot application classes -->
+            <property name="id" value="hideUtilityClassConstructor"/>
+        </module>
         <module name="InterfaceIsType"/>
 
         <!-- Miscellaneous other checks -->

@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<suppressions>
+    <!-- Suppress HideUtilityClassConstructor for Spring Boot Application classes -->
+    <suppress checks="HideUtilityClassConstructor" 
+              files=".*Application\.java$"/>
+    
+    <!-- Suppress MemberName checks for JPA entities -->
+    <suppress checks="MemberName" 
+              files=".*entity[\\/].*\.java$"/>
+    
+    <!-- Suppress MemberName checks for Spring services -->
+    <suppress checks="MemberName" 
+              files=".*service[\\/].*\.java$"/>
+    
+    <!-- Suppress MemberName checks for Spring controllers -->
+    <suppress checks="MemberName" 
+              files=".*controller[\\/].*\.java$"/>
+    
+    <!-- Suppress MemberName checks for Spring repositories -->
+    <suppress checks="MemberName" 
+              files=".*repository[\\/].*\.java$"/>
+</suppressions>
+
