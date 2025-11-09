@@ -1,23 +1,25 @@
-name: 🔄 Renovate Dependencies
+name: Renovate
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 2:00 AM UTC
-  workflow_dispatch:
+    - cron: '0 3 * * *'   # Run daily at 3 AM UTC
+  workflow_dispatch:       # Allow manual trigger
 
 jobs:
   renovate:
-    name: 🔄 Renovate Dependencies
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate Renovate JSON
-        run: jq type .github/renovate.json
-
       - name: Run Renovate
-        uses: renovatebot/github-action@v44.0.0
+        uses: renovatebot/github-action@v40.1.4
         with:
-          token:  ${{ secrets.RENOVATE_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # optional: specify config file
           configurationFile: .github/renovate.json

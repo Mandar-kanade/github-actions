@@ -1,51 +1,22 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
-      "config:base",
-      ":semanticCommits",
-      ":dependencyDashboard",
-      ":automergeMinor",
-      ":maintainLockFilesWeekly"
+      "config:base"
     ],
-  
-    "enabledManagers": ["maven", "gradle", "github-actions"],
-  
+    "labels": ["dependencies"],
+    "dependencyDashboard": true,
+    "enabledManagers": ["maven", "gradle"],
     "packageRules": [
       {
-        "matchManagers": ["maven", "gradle"],
-        "matchUpdateTypes": ["patch"],
-        "automerge": true,
-        "description": "Automerge safe patch updates for dependencies"
+        "matchManagers": ["maven"],
+        "groupName": "Maven dependencies",
+        "groupSlug": "maven-deps"
       },
       {
-        "matchManagers": ["maven", "gradle"],
-        "matchUpdateTypes": ["minor", "major"],
-        "labels": ["dependencies"],
-        "automerge": false
-      },
-      {
-        "matchDepTypes": ["plugin"],
-        "groupName": "Build plugins",
-        "labels": ["build", "dependencies"]
-      },
-      {
-        "matchManagers": ["maven", "gradle"],
-        "matchDepTypes": ["dependencies"],
-        "labels": ["security", "vulnerability"],
-        "description": "Prioritize known vulnerable packages"
+        "matchManagers": ["gradle"],
+        "groupName": "Gradle dependencies",
+        "groupSlug": "gradle-deps"
       }
-    ],
-  
-    "vulnerabilityAlerts": {
-      "enabled": true,
-      "labels": ["security", "vulnerability", "priority:high"],
-      "automerge": true
-    },
-  
-    "dependencyDashboard": true,
-    "rebaseWhen": "behind-base-branch",
-    "labels": ["dependencies", "renovate"],
-    "timezone": "UTC",
-    "schedule": ["after 6pm every weekday", "before 6am every weekday"]
-  }
+    ]
+}
   
