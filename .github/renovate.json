@@ -3,35 +3,56 @@
   "extends": [
     "config:best-practices"
   ],
-  "labels": ["dependencies", "renovate"],
+  "labels": [
+    "dependencies",
+    "renovate"
+  ],
   "prHourlyLimit": 2,
   "prConcurrentLimit": 10,
   "automerge": false,
   "rangeStrategy": "replace",
-  "baseBranches": ["develop"],
-
+  "baseBranchPatterns": [
+    "develop"
+  ],
   "packageRules": [
     {
-      "matchManagers": ["maven"],
+      "matchManagers": [
+        "maven"
+      ],
       "groupName": "Maven dependencies (minor+patch)",
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "automerge": true
     },
     {
-      "matchManagers": ["maven"],
+      "matchManagers": [
+        "maven"
+      ],
       "groupName": "Maven major upgrades",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false,
-      "labels": ["major-upgrade"]
+      "labels": [
+        "major-upgrade"
+      ]
     },
     {
-      "matchManagers": ["maven"],
-      "matchDepTypes": ["plugin"],
+      "matchManagers": [
+        "maven"
+      ],
+      "matchDepTypes": [
+        "plugin"
+      ],
       "groupName": "Maven build plugins",
       "automerge": false
     }
   ],
-
   "dependencyDashboard": true,
-  "enabledManagers": ["maven", "maven-wrapper"]
+  "enabledManagers": [
+    "maven",
+    "maven-wrapper"
+  ]
 }
