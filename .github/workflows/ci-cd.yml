@@ -268,28 +268,37 @@ jobs:
   quality-gate:
     name: 📊 Quality Gate
     runs-on: ubuntu-latest
-    needs: [lint, format-check, build-and-test, sonarcloud, codeql]
+    needs: [lint, format-check, build-and-test, sonarcloud, codeql, docker-build-and-push]
     if: always()
+    outputs:
+      passed: ${{ steps.gate-check.outputs.passed }}
     
     steps:
       - name: Check quality gate
+        id: gate-check
         run: |
           lint_status="${{ needs.lint.result }}"
           format_status="${{ needs.format-check.result }}"
           build_test_status="${{ needs.build-and-test.result }}"
           sonar_status="${{ needs.sonarcloud.result }}"
           codeql_status="${{ needs.codeql.result }}"
+          docker_status="${{ needs.docker-build-and-push.result }}"
+          
           echo "🔍 Lint: $lint_status"
           echo "📐 Format: $format_status"
           echo "🔨 Build & Test: $build_test_status"
           echo "🔬 SonarCloud: $sonar_status"
           echo "🔬 CodeQL: $codeql_status"
-          if [ "$lint_status" == "failure" ] || [ "$format_status" == "failure" ] || [ "$build_test_status" == "failure" ] || [ "$sonar_status" == "failure" ] || [ "$codeql_status" == "failure" ]; then
+          echo "🐳 Docker: $docker_status"
+          
+          if [ "$lint_status" == "failure" ] || [ "$format_status" == "failure" ] || [ "$build_test_status" == "failure" ] || [ "$sonar_status" == "failure" ] || [ "$codeql_status" == "failure" ] || [ "$docker_status" == "failure" ]; then
             echo "❌ Quality gate failed!"
+            echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           echo "✅ Quality gate passed!"
+          echo "passed=true" >> $GITHUB_OUTPUT
       
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -309,13 +318,15 @@ jobs:
           echo "| 🔨 Build & Test | ${{ needs.build-and-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔬 SonarCloud | ${{ needs.sonarcloud.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔬 CodeQL | ${{ needs.codeql.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐳 Docker | ${{ needs.docker-build-and-push.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ needs.lint.result }}" == "success" ] && \
              [ "${{ needs.format-check.result }}" == "success" ] && \
              [ "${{ needs.build-and-test.result }}" == "success" ] && \
              [ "${{ needs.sonarcloud.result }}" == "success" ] && \
-             [ "${{ needs.codeql.result }}" == "success" ]; then
+             [ "${{ needs.codeql.result }}" == "success" ] && \
+             [ "${{ needs.docker-build-and-push.result }}" == "success" ]; then
             echo "## ✅ All checks passed!" >> $GITHUB_STEP_SUMMARY
           else
             echo "## ❌ Some checks failed!" >> $GITHUB_STEP_SUMMARY
@@ -326,3 +337,153 @@ jobs:
           echo "- Workflow: \`${{ github.workflow }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Run: \`#${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Triggered by: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # PHASE 5: DEPLOY TO RENDER.COM
+  # Only runs on main branch after quality gate passes
+  # ============================================
+  
+  deploy-to-render:
+    name: 🚀 Deploy to Render.com
+    runs-on: ubuntu-latest
+    needs: [quality-gate, docker-build-and-push]
+    if: |
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.quality-gate.outputs.passed == 'true'
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.service_url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Prepare Docker image details
+        id: image
+        run: |
+          # Construct the image URL from GHCR
+          REGISTRY="ghcr.io"
+          IMAGE_NAME="${{ github.repository_owner }}/${{ github.event.repository.name }}"
+          IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          IMAGE_TAG="main-${{ github.sha }}"
+          FULL_IMAGE="${IMAGE_NAME_LOWER}:${IMAGE_TAG}"
+          
+          echo "📦 Docker Image: $FULL_IMAGE"
+          echo "image_url=$FULL_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+      
+      - name: Deploy Docker image to Render
+        id: deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          IMAGE_URL: ${{ steps.image.outputs.image_url }}
+        run: |
+          echo "🚀 Starting deployment to Render.com..."
+          echo "🐳 Deploying image: $IMAGE_URL"
+          
+          # Trigger Render deployment with specific Docker image
+          RESPONSE=$(curl -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"clearCache\": \"do_not_clear\",
+              \"imageUrl\": \"$IMAGE_URL\"
+            }")
+          
+          echo "Render API Response: $RESPONSE"
+          
+          # Extract deploy ID from response
+          DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
+          
+          if [ "$DEPLOY_ID" != "null" ] && [ -n "$DEPLOY_ID" ]; then
+            echo "✅ Deployment triggered successfully!"
+            echo "Deploy ID: $DEPLOY_ID"
+            echo "deploy_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+            
+            # Get service URL
+            SERVICE_INFO=$(curl -X GET "https://api.render.com/v1/services/${RENDER_SERVICE_ID}" \
+              -H "Accept: application/json" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}")
+            
+            SERVICE_URL=$(echo $SERVICE_INFO | jq -r '.serviceDetails.url // .service.serviceDetails.url // empty')
+            
+            if [ -n "$SERVICE_URL" ]; then
+              echo "service_url=https://$SERVICE_URL" >> $GITHUB_OUTPUT
+              echo "🌐 Service URL: https://$SERVICE_URL"
+            fi
+          else
+            echo "❌ Deployment failed!"
+            echo "Error: $(echo $RESPONSE | jq -r '.message // .error // \"Unknown error\"')"
+            exit 1
+          fi
+      
+      - name: Wait for deployment completion
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          DEPLOY_ID: ${{ steps.deploy.outputs.deploy_id }}
+        run: |
+          echo "⏳ Waiting for deployment to complete..."
+          
+          MAX_WAIT=600  # 10 minutes
+          ELAPSED=0
+          INTERVAL=15
+          
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            DEPLOY_STATUS=$(curl -s -X GET "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys/${DEPLOY_ID}" \
+              -H "Accept: application/json" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" | jq -r '.status')
+            
+            echo "Current status: $DEPLOY_STATUS (${ELAPSED}s elapsed)"
+            
+            if [ "$DEPLOY_STATUS" == "live" ]; then
+              echo "✅ Deployment completed successfully!"
+              exit 0
+            elif [ "$DEPLOY_STATUS" == "build_failed" ] || [ "$DEPLOY_STATUS" == "deactivated" ]; then
+              echo "❌ Deployment failed with status: $DEPLOY_STATUS"
+              exit 1
+            fi
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          echo "⚠️ Deployment timeout reached (${MAX_WAIT}s)"
+          echo "Please check Render dashboard for deployment status"
+          exit 1
+      
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "# 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: Render.com" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: \`${{ steps.image.outputs.image_url }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ steps.image.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy ID**: \`${{ steps.deploy.outputs.deploy_id }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ steps.deploy.outputs.service_url }}" ]; then
+            echo "- **URL**: ${{ steps.deploy.outputs.service_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Docker Image Details" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment uses the Docker image built and pushed to GitHub Container Registry (GHCR)." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ steps.image.outputs.image_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ **Deployment completed successfully!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Deployment failed!**" >> $GITHUB_STEP_SUMMARY
+          fi
