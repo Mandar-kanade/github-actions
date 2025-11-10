@@ -1,4 +1,4 @@
-name: Java Calculator CI/CD
+name: Java Product Service CI/CD
 
 on:
   push:
@@ -118,7 +118,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: calculator-jar
+          name: product-service-jar
           path: target/*.jar
           retention-days: 30
       
