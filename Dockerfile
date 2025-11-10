@@ -10,7 +10,7 @@ RUN mvn dependency:go-offline
 
 # Copy the source code and build the jar
 COPY src ./src
-RUN mvn clean package -DskipTests -Dcheckstyle.skip=true
+RUN mvn clean package -DskipTests -Dcheckstyle.skip=true -Dspotless.skip=true -Dmaven.formatter.skip=true
 
 # =========================
 # Stage 2. Run the application
