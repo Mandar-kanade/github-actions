@@ -1,5 +1,9 @@
 package com.example.productservice.service;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Optional;
 
@@ -72,6 +76,7 @@ public class ProductService {
      * @return an Optional containing the updated product if found
      */
     public Optional<Product> updateProduct(Long pId, Product pProduct) {
+        checkProduct(pProduct.getName());
         return productRepository.findById(pId).map(existingProduct -> {
             existingProduct.setName(pProduct.getName());
             existingProduct.setCategory(pProduct.getCategory());
@@ -94,5 +99,32 @@ public class ProductService {
             return true;
         }
         return false;
+    }
+
+    public void checkProduct(String pProductName) {
+        try {
+            // Hardcoded credentials (SAST should flag this)
+            String url = "jdbc:mysql://localhost:3306/products";
+            String user = "root";
+            String password = "password123"; // hardcoded secret
+
+            Connection connection = DriverManager.getConnection(url, user, password);
+            Statement statement = connection.createStatement();
+
+            // SQL injection vulnerability (SAST should flag this)
+            String query = "SELECT * FROM product WHERE name = '" + pProductName + "'";
+            ResultSet resultSet = statement.executeQuery(query);
+
+            while (resultSet.next()) {
+                System.out.println("Found product: " + resultSet.getString("name"));
+            }
+
+            resultSet.close();
+            statement.close();
+            connection.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }
