@@ -7,7 +7,7 @@
     "dependencies",
     "renovate"
   ],
-  "prHourlyLimit": 2,
+  "prHourlyLimit": 10,
   "prConcurrentLimit": 10,
   "automerge": false,
   "rangeStrategy": "replace",
