@@ -236,18 +236,26 @@ jobs:
           REGISTRY: ghcr.io
           IMAGE_NAME: ${{ github.repository_owner }}/${{ github.event.repository.name }}
         run: |
-          docker build -t $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} .
-
-          docker tag $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}
-          docker tag $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $REGISTRY/$IMAGE_NAME:${{ github.run_number }}
-
-          docker push $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}
-          docker push $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}
-          docker push $REGISTRY/$IMAGE_NAME:${{ github.run_number }}
-
+          # Force image name to lowercase (GHCR/Docker requirement)
+          IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+      
+          echo "Building image: $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}"
+      
+          # Build the image with unique tag (branch + SHA)
+          docker build -t $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} .
+      
+          # Tag additional versions (branch tag + CI run number)
+          docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
+          docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:${{ github.run_number }}
+      
+          # Push all tags
+          docker push $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}
+          docker push $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
+          docker push $IMAGE_NAME_LOWER:${{ github.run_number }}
+      
           if [ "${{ steps.vars.outputs.safe_branch }}" = "main" ]; then
-            docker tag $REGISTRY/$IMAGE_NAME:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $REGISTRY/$IMAGE_NAME:latest
-            docker push $REGISTRY/$IMAGE_NAME:latest
+            docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:latest
+            docker push $IMAGE_NAME_LOWER:latest
           fi
 
   # ============================================
