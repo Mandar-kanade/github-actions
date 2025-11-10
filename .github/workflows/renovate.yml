@@ -26,4 +26,4 @@ jobs:
           configurationFile: .github/renovate.json
         env:
           RENOVATE_REPOSITORIES: mandar-kanade/github-actions
-          LOG_LEVEL: debug
+          LOG_LEVEL: info
