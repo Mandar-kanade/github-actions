@@ -1,22 +1,36 @@
 {
-    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "extends": [
-      "config:base"
-    ],
-    "labels": ["dependencies"],
-    "dependencyDashboard": true,
-    "enabledManagers": ["maven", "gradle"],
-    "packageRules": [
-      {
-        "matchManagers": ["maven"],
-        "groupName": "Maven dependencies",
-        "groupSlug": "maven-deps"
-      },
-      {
-        "matchManagers": ["gradle"],
-        "groupName": "Gradle dependencies",
-        "groupSlug": "gradle-deps"
-      }
-    ]
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices"
+  ],
+  "labels": ["dependencies", "renovate"],
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 10,
+  "automerge": false,
+  "rangeStrategy": "replace",
+
+  "packageRules": [
+    {
+      "matchManagers": ["maven"],
+      "groupName": "Maven dependencies (minor+patch)",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "matchManagers": ["maven"],
+      "groupName": "Maven major upgrades",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["major-upgrade"]
+    },
+    {
+      "matchManagers": ["maven"],
+      "matchDepTypes": ["plugin"],
+      "groupName": "Maven build plugins",
+      "automerge": false
+    }
+  ],
+
+  "dependencyDashboard": true,
+  "enabledManagers": ["maven", "maven-wrapper"]
 }
-  
