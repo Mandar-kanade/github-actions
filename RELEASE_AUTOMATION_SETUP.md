@@ -17,6 +17,7 @@ The release automation system maintains a persistent pull request from `develop`
 1. **Branch Structure**: Ensure you have `develop` and `main` branches
 2. **Semantic Commits**: Use semantic commit messages (see below)
 3. **Branch Protection**: Configure branch protection rules (see below)
+4. **GitHub Actions Permissions**: Enable PR creation permissions (see below)
 
 ## Semantic Commit Messages
 
@@ -68,7 +69,19 @@ The workflows will automatically create the release PR on the first run. To trig
 3. Select `develop` branch
 4. Click "Run workflow"
 
-### 2. Configure Branch Protection Rules
+### 2. Enable GitHub Actions PR Permissions
+
+**CRITICAL**: The workflow needs permission to create pull requests:
+
+1. Go to **Settings** → **Actions** → **General**
+2. Scroll to **Workflow permissions**
+3. Select **Read and write permissions**
+4. ✅ Check **"Allow GitHub Actions to create and approve pull requests"**
+5. Click **Save**
+
+Without this setting, the workflow will fail with a 403 error when trying to create the release PR.
+
+### 3. Configure Branch Protection Rules
 
 To require version approval before merging:
 
@@ -80,7 +93,7 @@ To require version approval before merging:
    - Add check: **"Version Approval Required"**
    - ✅ Require branches to be up to date before merging
 
-### 3. Version Approval Process
+### 4. Version Approval Process
 
 When a release PR is created or updated:
 
@@ -90,7 +103,7 @@ When a release PR is created or updated:
    - Option B: Approve the PR through GitHub UI (requires branch protection)
 3. **Merge**: Once approved, merge the PR to `main`
 
-### 4. Automatic Release
+### 5. Automatic Release
 
 When the PR is merged:
 - ✅ Git tag is created (e.g., `v1.2.3`)
