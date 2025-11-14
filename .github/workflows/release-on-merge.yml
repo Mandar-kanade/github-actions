@@ -1,0 +1,186 @@
+name: Release on Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.count=3
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main  # Checkout main branch where PR was merged
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+      
+      - name: Extract version from pom.xml
+        id: version
+        run: |
+          # Use a more portable method to extract version
+          # Match version tag that comes after artifactId=product-service
+          VERSION=$(grep -A 1 "<artifactId>product-service</artifactId>" pom.xml | grep "<version>" | sed 's/.*<version>\([^<]*\)<\/version>.*/\1/')
+          # Remove -SNAPSHOT if present
+          VERSION=${VERSION%-SNAPSHOT}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from pom.xml"
+            exit 1
+          fi
+      
+      - name: Get changelog
+        id: changelog
+        run: |
+          # Get the last release tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release found"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            echo "Generating changelog since $LAST_TAG"
+            CHANGELOG=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Escape for GitHub API
+          CHANGELOG_ESCAPED=$(echo "$CHANGELOG" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create Git Tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          
+          echo "Created tag: $TAG"
+      
+      - name: Build release artifacts
+        run: |
+          mvn clean package -DskipTests -B
+      
+      - name: Create GitHub Release and Upload Artifacts
+        id: create-release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/product-service-${{ steps.version.outputs.version }}.jar
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          body: |
+            ## Release v${{ steps.version.outputs.version }}
+            
+            ### Changes
+            ${{ steps.changelog.outputs.changelog }}
+            
+            ### Installation
+            ```bash
+            # Download JAR
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/product-service-${{ steps.version.outputs.version }}.jar
+            ```
+            
+            ### Docker
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:v${{ steps.version.outputs.version }}
+            ```
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+      
+      - name: Build and push Docker image with release tag
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build and push Docker image
+        run: |
+          REGISTRY="ghcr.io"
+          IMAGE_NAME="${{ github.repository_owner }}/${{ github.event.repository.name }}"
+          IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag ${IMAGE_NAME_LOWER}:${TAG} \
+            --tag ${IMAGE_NAME_LOWER}:latest \
+            --push \
+            .
+          
+          echo "✅ Pushed Docker image: ${IMAGE_NAME_LOWER}:${TAG}"
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: Update develop branch version
+        run: |
+          git checkout develop
+          git pull origin develop
+          
+          # Update version to next snapshot
+          VERSION="${{ steps.version.outputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_SNAPSHOT="${MAJOR}.${MINOR}.${NEXT_PATCH}-SNAPSHOT"
+          
+          # Update pom.xml using Python script
+          python3 scripts/update-pom-version.py pom.xml "${NEXT_SNAPSHOT}"
+          
+          git add pom.xml
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: bump version to ${NEXT_SNAPSHOT} after release"
+            git push origin develop
+          else
+            echo "No version changes to commit"
+          fi
+      
+      - name: Release Summary
+        run: |
+          echo "## 🎉 Release Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release**: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- JAR: \`product-service-${{ steps.version.outputs.version }}.jar\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Docker: \`ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Changelog" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+

@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices"
+    "config:best-practices",
+    ":enableVulnerabilityAlertsWithLabel(security)"
   ],
   "labels": [
     "dependencies",
@@ -24,7 +25,12 @@
         "minor",
         "patch"
       ],
-      "automerge": true
+      "automerge": true,
+      "automergeType": "pr",
+      "labels": [
+        "dependencies",
+        "automerge"
+      ]
     },
     {
       "matchManagers": [
@@ -36,8 +42,10 @@
       ],
       "automerge": false,
       "labels": [
+        "dependencies",
         "major-upgrade"
-      ]
+      ],
+      "prPriority": -1
     },
     {
       "matchManagers": [
@@ -47,12 +55,182 @@
         "plugin"
       ],
       "groupName": "Maven build plugins",
-      "automerge": false
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "build-tools"
+      ],
+      "prPriority": 1
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackageNames": [
+        "org.springframework.boot:spring-boot-starter-parent"
+      ],
+      "groupName": "Spring Boot parent",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "spring-boot"
+      ],
+      "prPriority": 2,
+      "separateMinorPatch": true
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackagePatterns": [
+        "^org\\.springframework\\.boot:spring-boot-.*"
+      ],
+      "groupName": "Spring Boot dependencies",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "labels": [
+        "dependencies",
+        "spring-boot",
+        "automerge"
+      ]
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackagePatterns": [
+        "^org\\.springframework\\.boot:spring-boot-.*"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "Spring Boot major upgrades",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "spring-boot",
+        "major-upgrade"
+      ],
+      "prPriority": 1
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchDepTypes": [
+        "plugin"
+      ],
+      "matchPackagePatterns": [
+        "^org\\.apache\\.maven\\.plugins:.*",
+        "^org\\.springframework\\.boot:spring-boot-maven-plugin"
+      ],
+      "groupName": "Maven core plugins",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "build-tools",
+        "maven-plugins"
+      ],
+      "prPriority": 1
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackagePatterns": [
+        "^com\\.h2database:h2$"
+      ],
+      "groupName": "H2 Database",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "labels": [
+        "dependencies",
+        "database",
+        "automerge"
+      ]
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackagePatterns": [
+        "^org\\.sonarsource\\.scanner\\.maven:sonar-maven-plugin$",
+        "^org\\.jacoco:jacoco-maven-plugin$"
+      ],
+      "groupName": "Code quality plugins",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "code-quality"
+      ]
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchPackagePatterns": [
+        "^com\\.puppycrawl\\.tools:checkstyle$",
+        "^org\\.apache\\.maven\\.plugins:maven-checkstyle-plugin$",
+        "^net\\.revelc\\.code\\.formatter:formatter-maven-plugin$"
+      ],
+      "groupName": "Code style plugins",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "code-style"
+      ]
+    },
+    {
+      "matchManagers": [
+        "maven"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "labels": [
+        "dependencies",
+        "automerge"
+      ]
     }
   ],
   "dependencyDashboard": true,
+  "dependencyDashboardTitle": "🔄 Dependency Dashboard",
+  "dependencyDashboardLabels": [
+    "dependencies",
+    "renovate"
+  ],
   "enabledManagers": [
     "maven",
     "maven-wrapper"
-  ]
+  ],
+  "maven": {
+    "enabled": true
+  },
+  "maven-wrapper": {
+    "enabled": true
+  },
+  "prTitle": "{{#if isMajor}}⬆️{{else if isMinor}}⬆️{{else}}⬆️{{/if}} {{#if isGroup}}Update {{groupName}}{{else}}Update {{depName}}{{/if}} to {{newVersion}}",
+  "prBodyTemplate": "{{#if isGroup}}## Updates\n\n{{#each updates}}\n- {{#if isMajor}}⬆️{{else if isMinor}}⬆️{{else}}⬆️{{/if}} {{depName}}: {{currentVersion}} → {{newVersion}}\n{{/each}}\n{{/if}}\n\n{{#if isMajor}}\n⚠️ **Major Version Update**\n\nThis PR includes a major version update. Please review carefully for breaking changes.\n{{/if}}\n\n{{#if isSecurity}}\n🔒 **Security Update**\n\nThis PR addresses security vulnerabilities. Please prioritize review.\n{{/if}}\n\n{{#if isGroup}}\n{{#each updates}}\n{{#if isMajor}}\n### ⚠️ Breaking Changes\n\nPlease review the [changelog]({{#if homepage}}{{homepage}}{{else}}https://github.com/{{depName}}{{/if}}) for breaking changes.\n{{/if}}\n{{/each}}\n{{/if}}\n\n---\n\n[![Renovate](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://renovatebot.com)",
+  "ignoreDeps": [],
+  "ignorePaths": [],
+  "reviewers": [],
+  "assignees": [],
+  "assigneesSampleSize": 1,
+  "reviewersSampleSize": 1,
+  "commitMessagePrefix": "⬆️",
+  "commitMessageAction": "Update",
+  "commitMessageTopic": "{{depName}}",
+  "commitMessageExtra": "to {{newVersion}}",
+  "semanticCommits": "enabled",
+  "semanticCommitType": "build",
+  "semanticCommitScope": "deps"
 }
