@@ -82,9 +82,6 @@
       "matchManagers": [
         "maven"
       ],
-      "matchPackagePatterns": [
-        "^org\\.springframework\\.boot:spring-boot-.*"
-      ],
       "groupName": "Spring Boot dependencies",
       "matchUpdateTypes": [
         "minor",
@@ -97,14 +94,14 @@
         "dependencies",
         "spring-boot",
         "automerge"
+      ],
+      "matchPackageNames": [
+        "/^org\\.springframework\\.boot:spring-boot-.*/"
       ]
     },
     {
       "matchManagers": [
         "maven"
-      ],
-      "matchPackagePatterns": [
-        "^org\\.springframework\\.boot:spring-boot-.*"
       ],
       "matchUpdateTypes": [
         "major"
@@ -116,7 +113,10 @@
         "spring-boot",
         "major-upgrade"
       ],
-      "prPriority": 1
+      "prPriority": 1,
+      "matchPackageNames": [
+        "/^org\\.springframework\\.boot:spring-boot-.*/"
+      ]
     },
     {
       "matchManagers": [
@@ -125,10 +125,6 @@
       "matchDepTypes": [
         "plugin"
       ],
-      "matchPackagePatterns": [
-        "^org\\.apache\\.maven\\.plugins:.*",
-        "^org\\.springframework\\.boot:spring-boot-maven-plugin"
-      ],
       "groupName": "Maven core plugins",
       "automerge": false,
       "labels": [
@@ -136,14 +132,15 @@
         "build-tools",
         "maven-plugins"
       ],
-      "prPriority": 1
+      "prPriority": 1,
+      "matchPackageNames": [
+        "/^org\\.apache\\.maven\\.plugins:.*/",
+        "/^org\\.springframework\\.boot:spring-boot-maven-plugin/"
+      ]
     },
     {
       "matchManagers": [
         "maven"
-      ],
-      "matchPackagePatterns": [
-        "^com\\.h2database:h2$"
       ],
       "groupName": "H2 Database",
       "automerge": true,
@@ -153,37 +150,40 @@
         "dependencies",
         "database",
         "automerge"
+      ],
+      "matchPackageNames": [
+        "/^com\\.h2database:h2$/"
       ]
     },
     {
       "matchManagers": [
         "maven"
-      ],
-      "matchPackagePatterns": [
-        "^org\\.sonarsource\\.scanner\\.maven:sonar-maven-plugin$",
-        "^org\\.jacoco:jacoco-maven-plugin$"
       ],
       "groupName": "Code quality plugins",
       "automerge": false,
       "labels": [
         "dependencies",
         "code-quality"
+      ],
+      "matchPackageNames": [
+        "/^org\\.sonarsource\\.scanner\\.maven:sonar-maven-plugin$/",
+        "/^org\\.jacoco:jacoco-maven-plugin$/"
       ]
     },
     {
       "matchManagers": [
         "maven"
       ],
-      "matchPackagePatterns": [
-        "^com\\.puppycrawl\\.tools:checkstyle$",
-        "^org\\.apache\\.maven\\.plugins:maven-checkstyle-plugin$",
-        "^net\\.revelc\\.code\\.formatter:formatter-maven-plugin$"
-      ],
       "groupName": "Code style plugins",
       "automerge": false,
       "labels": [
         "dependencies",
         "code-style"
+      ],
+      "matchPackageNames": [
+        "/^com\\.puppycrawl\\.tools:checkstyle$/",
+        "/^org\\.apache\\.maven\\.plugins:maven-checkstyle-plugin$/",
+        "/^net\\.revelc\\.code\\.formatter:formatter-maven-plugin$/"
       ]
     },
     {
