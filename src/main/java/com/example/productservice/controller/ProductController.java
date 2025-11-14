@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.productservice.entity.Product;
@@ -106,5 +107,27 @@ public class ProductController {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.notFound().build();
+    }
+
+    /**
+     * GET endpoint to search products with multiple optional filters.
+     *
+     * @param pName
+     *            optional name pattern to search for (case-insensitive)
+     * @param pCategory
+     *            optional category to filter by
+     * @param pMinPrice
+     *            optional minimum price (inclusive)
+     * @param pMaxPrice
+     *            optional maximum price (inclusive)
+     * @return list of products matching the search criteria
+     */
+    @GetMapping("/search")
+    public ResponseEntity<List<Product>> searchProducts(@RequestParam(value = "name", required = false) String pName,
+            @RequestParam(value = "category", required = false) String pCategory,
+            @RequestParam(value = "minPrice", required = false) Double pMinPrice,
+            @RequestParam(value = "maxPrice", required = false) Double pMaxPrice) {
+        List<Product> products = productService.searchProducts(pName, pCategory, pMinPrice, pMaxPrice);
+        return ResponseEntity.ok(products);
     }
 }

@@ -226,4 +226,111 @@ class ProductControllerIntegrationTest {
                     .andExpect(status().isNotFound());
         }
     }
+
+    /**
+     * Tests for GET /api/products/search endpoint.
+     */
+    @Nested
+    @DisplayName("GET /api/products/search Tests")
+    class SearchProductsTests {
+
+        @Test
+        @DisplayName("Should return products matching name pattern")
+        void testSearchProductsByName() throws Exception {
+            // Arrange
+            productRepository.save(new Product("Laptop", "Electronics", 999.99, 10));
+            productRepository.save(new Product("Gaming Mouse", "Electronics", 49.99, 20));
+            productRepository.save(new Product("Keyboard", "Electronics", 79.99, 15));
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").param("name", "Laptop").contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].name", is("Laptop"))).andExpect(jsonPath("$[0].price", is(999.99)));
+        }
+
+        @Test
+        @DisplayName("Should return products matching category")
+        void testSearchProductsByCategory() throws Exception {
+            // Arrange
+            productRepository.save(new Product("Laptop", "Electronics", 999.99, 10));
+            productRepository.save(new Product("Mouse", "Electronics", 29.99, 50));
+            productRepository.save(new Product("Book", "Books", 19.99, 100));
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").param("category", "Electronics")
+                    .contentType(MediaType.APPLICATION_JSON)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(2))).andExpect(jsonPath("$[0].category", is("Electronics")))
+                    .andExpect(jsonPath("$[1].category", is("Electronics")));
+        }
+
+        @Test
+        @DisplayName("Should return products within price range")
+        void testSearchProductsByPriceRange() throws Exception {
+            // Arrange
+            productRepository.save(new Product("Laptop", "Electronics", 999.99, 10));
+            productRepository.save(new Product("Mouse", "Electronics", 29.99, 50));
+            productRepository.save(new Product("Keyboard", "Electronics", 79.99, 15));
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").param("minPrice", "0").param("maxPrice", "50")
+                    .contentType(MediaType.APPLICATION_JSON)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1))).andExpect(jsonPath("$[0].name", is("Mouse")))
+                    .andExpect(jsonPath("$[0].price", is(29.99)));
+        }
+
+        @Test
+        @DisplayName("Should return products matching all criteria")
+        void testSearchProductsWithAllCriteria() throws Exception {
+            // Arrange
+            productRepository.save(new Product("Laptop", "Electronics", 999.99, 10));
+            productRepository.save(new Product("Gaming Mouse", "Electronics", 49.99, 20));
+            productRepository.save(new Product("Keyboard", "Electronics", 79.99, 15));
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").param("name", "Mouse").param("category", "Electronics")
+                    .param("minPrice", "0").param("maxPrice", "50").contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].name", is("Gaming Mouse"))).andExpect(jsonPath("$[0].price", is(49.99)));
+        }
+
+        @Test
+        @DisplayName("Should return all products when no filters provided")
+        void testSearchProductsWithNoFilters() throws Exception {
+            // Arrange
+            productRepository.save(testProduct1);
+            productRepository.save(testProduct2);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(2)));
+        }
+
+        @Test
+        @DisplayName("Should return empty list when no products match criteria")
+        void testSearchProductsNoMatch() throws Exception {
+            // Arrange
+            productRepository.save(testProduct1);
+            productRepository.save(testProduct2);
+
+            // Act & Assert
+            mockMvc.perform(
+                    get("/api/products/search").param("name", "NonExistent").contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(0)));
+        }
+
+        @Test
+        @DisplayName("Should return products matching name and category")
+        void testSearchProductsByNameAndCategory() throws Exception {
+            // Arrange
+            productRepository.save(new Product("Laptop", "Electronics", 999.99, 10));
+            productRepository.save(new Product("Laptop Bag", "Accessories", 49.99, 20));
+            productRepository.save(new Product("Gaming Mouse", "Electronics", 29.99, 50));
+
+            // Act & Assert
+            mockMvc.perform(get("/api/products/search").param("name", "Laptop").param("category", "Electronics")
+                    .contentType(MediaType.APPLICATION_JSON)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1))).andExpect(jsonPath("$[0].name", is("Laptop")))
+                    .andExpect(jsonPath("$[0].category", is("Electronics")));
+        }
+    }
 }

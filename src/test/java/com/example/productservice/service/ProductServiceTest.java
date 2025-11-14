@@ -230,4 +230,206 @@ class ProductServiceTest {
             verify(productRepository, never()).deleteById(999L);
         }
     }
+
+    /**
+     * Tests for searchProductsByName method.
+     */
+    @Nested
+    @DisplayName("Search Products By Name Tests")
+    class SearchProductsByNameTests {
+
+        @Test
+        @DisplayName("Should return products matching name pattern")
+        void testSearchProductsByName() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1);
+            when(productRepository.findByNameContainingIgnoreCase("Laptop")).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProductsByName("Laptop");
+
+            // Assert
+            assertEquals(1, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).findByNameContainingIgnoreCase("Laptop");
+        }
+
+        @Test
+        @DisplayName("Should return empty list when no products match")
+        void testSearchProductsByNameNoMatch() {
+            // Arrange
+            when(productRepository.findByNameContainingIgnoreCase("NonExistent")).thenReturn(Arrays.asList());
+
+            // Act
+            List<Product> result = productService.searchProductsByName("NonExistent");
+
+            // Assert
+            assertEquals(0, result.size());
+            verify(productRepository, times(1)).findByNameContainingIgnoreCase("NonExistent");
+        }
+    }
+
+    /**
+     * Tests for getProductsByCategory method.
+     */
+    @Nested
+    @DisplayName("Get Products By Category Tests")
+    class GetProductsByCategoryTests {
+
+        @Test
+        @DisplayName("Should return products in specified category")
+        void testGetProductsByCategory() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1, testProduct2);
+            when(productRepository.findByCategory("Electronics")).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.getProductsByCategory("Electronics");
+
+            // Assert
+            assertEquals(2, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).findByCategory("Electronics");
+        }
+
+        @Test
+        @DisplayName("Should return empty list when category has no products")
+        void testGetProductsByCategoryEmpty() {
+            // Arrange
+            when(productRepository.findByCategory("Books")).thenReturn(Arrays.asList());
+
+            // Act
+            List<Product> result = productService.getProductsByCategory("Books");
+
+            // Assert
+            assertEquals(0, result.size());
+            verify(productRepository, times(1)).findByCategory("Books");
+        }
+    }
+
+    /**
+     * Tests for getProductsByPriceRange method.
+     */
+    @Nested
+    @DisplayName("Get Products By Price Range Tests")
+    class GetProductsByPriceRangeTests {
+
+        @Test
+        @DisplayName("Should return products within price range")
+        void testGetProductsByPriceRange() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct2);
+            when(productRepository.findByPriceBetween(0.0, 50.0)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.getProductsByPriceRange(0.0, 50.0);
+
+            // Assert
+            assertEquals(1, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).findByPriceBetween(0.0, 50.0);
+        }
+
+        @Test
+        @DisplayName("Should return empty list when no products in price range")
+        void testGetProductsByPriceRangeEmpty() {
+            // Arrange
+            when(productRepository.findByPriceBetween(2000.0, 3000.0)).thenReturn(Arrays.asList());
+
+            // Act
+            List<Product> result = productService.getProductsByPriceRange(2000.0, 3000.0);
+
+            // Assert
+            assertEquals(0, result.size());
+            verify(productRepository, times(1)).findByPriceBetween(2000.0, 3000.0);
+        }
+    }
+
+    /**
+     * Tests for searchProducts method (advanced search).
+     */
+    @Nested
+    @DisplayName("Advanced Search Products Tests")
+    class AdvancedSearchProductsTests {
+
+        @Test
+        @DisplayName("Should return products matching all criteria")
+        void testSearchProductsWithAllCriteria() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1);
+            when(productRepository.searchProducts("Laptop", "Electronics", 500.0, 1500.0)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProducts("Laptop", "Electronics", 500.0, 1500.0);
+
+            // Assert
+            assertEquals(1, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).searchProducts("Laptop", "Electronics", 500.0, 1500.0);
+        }
+
+        @Test
+        @DisplayName("Should return products with only name filter")
+        void testSearchProductsWithNameOnly() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1);
+            when(productRepository.searchProducts("Laptop", null, null, null)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProducts("Laptop", null, null, null);
+
+            // Assert
+            assertEquals(1, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).searchProducts("Laptop", null, null, null);
+        }
+
+        @Test
+        @DisplayName("Should return products with only category filter")
+        void testSearchProductsWithCategoryOnly() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1, testProduct2);
+            when(productRepository.searchProducts(null, "Electronics", null, null)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProducts(null, "Electronics", null, null);
+
+            // Assert
+            assertEquals(2, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).searchProducts(null, "Electronics", null, null);
+        }
+
+        @Test
+        @DisplayName("Should return products with only price range filter")
+        void testSearchProductsWithPriceRangeOnly() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct2);
+            when(productRepository.searchProducts(null, null, 0.0, 50.0)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProducts(null, null, 0.0, 50.0);
+
+            // Assert
+            assertEquals(1, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).searchProducts(null, null, 0.0, 50.0);
+        }
+
+        @Test
+        @DisplayName("Should return all products when no filters provided")
+        void testSearchProductsWithNoFilters() {
+            // Arrange
+            List<Product> expectedProducts = Arrays.asList(testProduct1, testProduct2);
+            when(productRepository.searchProducts(null, null, null, null)).thenReturn(expectedProducts);
+
+            // Act
+            List<Product> result = productService.searchProducts(null, null, null, null);
+
+            // Assert
+            assertEquals(2, result.size());
+            assertEquals(expectedProducts, result);
+            verify(productRepository, times(1)).searchProducts(null, null, null, null);
+        }
+    }
 }
