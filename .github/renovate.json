@@ -200,19 +200,6 @@
         "dependencies",
         "automerge"
       ]
-    },
-    {
-      "matchManagers": [
-        "maven"
-      ],
-      "matchVulnerabilityAlerts": true,
-      "groupName": "Security updates",
-      "automerge": false,
-      "labels": [
-        "dependencies",
-        "security"
-      ],
-      "prPriority": 10
     }
   ],
   "dependencyDashboard": true,
