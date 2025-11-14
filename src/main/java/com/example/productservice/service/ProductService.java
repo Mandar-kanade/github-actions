@@ -95,4 +95,57 @@ public class ProductService {
         }
         return false;
     }
+
+    /**
+     * Searches products by name (case-insensitive partial match).
+     *
+     * @param pName
+     *            the name pattern to search for
+     * @return list of products matching the name pattern
+     */
+    public List<Product> searchProductsByName(String pName) {
+        return productRepository.findByNameContainingIgnoreCase(pName);
+    }
+
+    /**
+     * Finds products by category.
+     *
+     * @param pCategory
+     *            the category to filter by
+     * @return list of products in the specified category
+     */
+    public List<Product> getProductsByCategory(String pCategory) {
+        return productRepository.findByCategory(pCategory);
+    }
+
+    /**
+     * Finds products within a price range.
+     *
+     * @param pMinPrice
+     *            the minimum price (inclusive)
+     * @param pMaxPrice
+     *            the maximum price (inclusive)
+     * @return list of products within the price range
+     */
+    public List<Product> getProductsByPriceRange(Double pMinPrice, Double pMaxPrice) {
+        return productRepository.findByPriceBetween(pMinPrice, pMaxPrice);
+    }
+
+    /**
+     * Advanced search for products with multiple criteria. All parameters are
+     * optional and can be combined.
+     *
+     * @param pName
+     *            the name pattern to search for (optional)
+     * @param pCategory
+     *            the category to filter by (optional)
+     * @param pMinPrice
+     *            the minimum price (optional)
+     * @param pMaxPrice
+     *            the maximum price (optional)
+     * @return list of products matching all specified criteria
+     */
+    public List<Product> searchProducts(String pName, String pCategory, Double pMinPrice, Double pMaxPrice) {
+        return productRepository.searchProducts(pName, pCategory, pMinPrice, pMaxPrice);
+    }
 }
