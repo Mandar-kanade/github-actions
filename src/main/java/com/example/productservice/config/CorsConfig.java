@@ -31,8 +31,9 @@ public class CorsConfig {
         // Allow all methods (GET, POST, PUT, DELETE, etc.)
         config.addAllowedMethod("*");
 
-        // Allow credentials
-        config.setAllowCredentials(true);
+        // Note: allowCredentials cannot be true when using wildcard origin pattern
+        // For security, credentials are disabled when allowing all origins
+        config.setAllowCredentials(false);
 
         source.registerCorsConfiguration("/**", config);
         return new CorsFilter(source);
