@@ -72,11 +72,23 @@ public class ProductService {
      * @return an Optional containing the updated product if found
      */
     public Optional<Product> updateProduct(Long pId, Product pProduct) {
+        if (pProduct == null) {
+            return Optional.empty();
+        }
         return productRepository.findById(pId).map(existingProduct -> {
-            existingProduct.setName(pProduct.getName());
-            existingProduct.setCategory(pProduct.getCategory());
-            existingProduct.setPrice(pProduct.getPrice());
-            existingProduct.setStock(pProduct.getStock());
+            // Defensive null checks to prevent NPE if validation is bypassed
+            if (pProduct.getName() != null) {
+                existingProduct.setName(pProduct.getName());
+            }
+            if (pProduct.getCategory() != null) {
+                existingProduct.setCategory(pProduct.getCategory());
+            }
+            if (pProduct.getPrice() != null) {
+                existingProduct.setPrice(pProduct.getPrice());
+            }
+            if (pProduct.getStock() != null) {
+                existingProduct.setStock(pProduct.getStock());
+            }
             return productRepository.save(existingProduct);
         });
     }

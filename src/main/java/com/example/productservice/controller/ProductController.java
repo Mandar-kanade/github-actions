@@ -59,10 +59,13 @@ public class ProductController {
      *
      * @param pId
      *            the product ID
-     * @return the product if found, 404 if not found
+     * @return the product if found, 404 if not found, 400 if invalid ID
      */
     @GetMapping("/{id}")
     public ResponseEntity<Product> getProductById(@PathVariable("id") Long pId) {
+        if (pId == null || pId <= 0) {
+            return ResponseEntity.badRequest().build();
+        }
         return productService.getProductById(pId).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
@@ -86,10 +89,13 @@ public class ProductController {
      *            the product ID to update
      * @param pProduct
      *            the product data to update
-     * @return the updated product if found, 404 if not found
+     * @return the updated product if found, 404 if not found, 400 if invalid ID
      */
     @PutMapping("/{id}")
     public ResponseEntity<Product> updateProduct(@PathVariable("id") Long pId, @Valid @RequestBody Product pProduct) {
+        if (pId == null || pId <= 0) {
+            return ResponseEntity.badRequest().build();
+        }
         return productService.updateProduct(pId, pProduct).map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -99,10 +105,13 @@ public class ProductController {
      *
      * @param pId
      *            the product ID to delete
-     * @return 204 if deleted successfully, 404 if not found
+     * @return 204 if deleted successfully, 404 if not found, 400 if invalid ID
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteProduct(@PathVariable("id") Long pId) {
+        if (pId == null || pId <= 0) {
+            return ResponseEntity.badRequest().build();
+        }
         if (productService.deleteProduct(pId)) {
             return ResponseEntity.noContent().build();
         }
@@ -120,13 +129,24 @@ public class ProductController {
      *            optional minimum price (inclusive)
      * @param pMaxPrice
      *            optional maximum price (inclusive)
-     * @return list of products matching the search criteria
+     * @return list of products matching the search criteria, 400 if invalid price
+     *         range
      */
     @GetMapping("/search")
     public ResponseEntity<List<Product>> searchProducts(@RequestParam(value = "name", required = false) String pName,
             @RequestParam(value = "category", required = false) String pCategory,
             @RequestParam(value = "minPrice", required = false) Double pMinPrice,
             @RequestParam(value = "maxPrice", required = false) Double pMaxPrice) {
+        // Validate price range
+        if (pMinPrice != null && pMinPrice < 0) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (pMaxPrice != null && pMaxPrice < 0) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (pMinPrice != null && pMaxPrice != null && pMinPrice > pMaxPrice) {
+            return ResponseEntity.badRequest().build();
+        }
         List<Product> products = productService.searchProducts(pName, pCategory, pMinPrice, pMaxPrice);
         return ResponseEntity.ok(products);
     }
