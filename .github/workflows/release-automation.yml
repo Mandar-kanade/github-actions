@@ -1,0 +1,456 @@
+name: Release Automation
+
+on:
+  push:
+    branches:
+      - develop
+  schedule:
+    # Check every hour for updates
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Force update release PR even if no changes'
+        required: false
+        default: false
+        type: boolean
+
+# Prevent concurrent runs to avoid race conditions and infinite loops
+concurrency:
+  group: release-automation
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  issues: write
+
+env:
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.count=3
+  RELEASE_PR_BRANCH: release/develop-to-main
+  BASE_BRANCH: main
+  HEAD_BRANCH: develop
+
+jobs:
+  maintain-release-pr:
+    name: Maintain Release PR
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.pr-info.outputs.number }}
+      pr_exists: ${{ steps.pr-info.outputs.exists }}
+      version: ${{ steps.version.outputs.version }}
+      version_type: ${{ steps.version.outputs.type }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Check if release PR exists
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${process.env.RELEASE_PR_BRANCH}`,
+              base: process.env.BASE_BRANCH,
+              state: 'open'
+            });
+            
+            if (prs.length > 0) {
+              const pr = prs[0];
+              core.setOutput('number', pr.number);
+              core.setOutput('exists', 'true');
+              return pr;
+            }
+            
+            core.setOutput('exists', 'false');
+            return null;
+        env:
+          RELEASE_PR_BRANCH: ${{ env.RELEASE_PR_BRANCH }}
+          BASE_BRANCH: ${{ env.BASE_BRANCH }}
+      
+      - name: Fetch all branches and tags
+        run: |
+          git fetch origin --all --tags
+      
+      - name: Calculate next version
+        id: version
+        run: |
+          # Make script executable
+          chmod +x scripts/calculate-version.sh
+          
+          # Ensure develop branch exists locally
+          git checkout develop 2>/dev/null || git checkout -b develop origin/develop
+          git pull origin develop || true
+          
+          # Use the calculate-version script
+          OUTPUT=$(./scripts/calculate-version.sh ${{ env.BASE_BRANCH }} ${{ env.HEAD_BRANCH }})
+          
+          # Extract version and type from output
+          VERSION=$(echo "$OUTPUT" | grep "^version=" | cut -d'=' -f2)
+          TYPE=$(echo "$OUTPUT" | grep "^type=" | cut -d'=' -f2)
+          
+          # Validate version is not empty and is valid semver
+          if [ -z "$VERSION" ] || [ -z "$TYPE" ]; then
+            echo "❌ Error: Version calculation failed or returned empty values"
+            echo "Output: $OUTPUT"
+            exit 1
+          fi
+          
+          # Validate semver format (basic check)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ Error: Invalid version format: $VERSION (expected semver like 1.2.3)"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+          
+          echo "$OUTPUT"
+      
+      - name: Check if version bump needed
+        id: check-version
+        run: |
+          if [ "${{ steps.version.outputs.type }}" = "none" ]; then
+            echo "skip_pr=true" >> $GITHUB_OUTPUT
+            echo "No version bump needed, skipping PR creation"
+            exit 0
+          fi
+          echo "skip_pr=false" >> $GITHUB_OUTPUT
+      
+      - name: Setup Python
+        if: steps.check-version.outputs.skip_pr != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: Update version in pom.xml (before rebase)
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          # Update version before rebase to reduce conflict risk
+          VERSION="${{ steps.version.outputs.version }}"
+          python3 scripts/update-pom-version.py pom.xml "${VERSION}"
+          
+          # Verify the change
+          echo "Updated pom.xml version to: $VERSION"
+          grep -A 1 "<artifactId>product-service</artifactId>" pom.xml | grep "<version>"
+      
+      - name: Create or recreate release branch
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          # Ensure we're on develop
+          git checkout develop
+          git pull origin develop
+          
+          # Fetch latest main for rebasing
+          git fetch origin main
+          
+          # Delete existing release branch if it exists (to avoid merge commits)
+          if git show-ref --verify --quiet refs/heads/${{ env.RELEASE_PR_BRANCH }}; then
+            git branch -D ${{ env.RELEASE_PR_BRANCH }} || true
+            git push origin --delete ${{ env.RELEASE_PR_BRANCH }} || true
+          fi
+          
+          # Create fresh branch from develop with version already updated
+          git checkout -b ${{ env.RELEASE_PR_BRANCH }} develop
+          
+          # Rebase on main to stay current
+          git rebase origin/main || {
+            echo "❌ Rebase conflict detected. This requires manual resolution."
+            echo "Please resolve conflicts in PR #${{ steps.pr-info.outputs.number }}"
+            git rebase --abort
+            exit 1
+          }
+      
+      - name: Commit version update
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          git add pom.xml
+          
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }}"
+          fi
+      
+      - name: Check if branch has changes
+        if: steps.check-version.outputs.skip_pr != 'true'
+        id: check-changes
+        run: |
+          # Check if branch differs from main
+          git fetch origin main
+          if git diff --quiet origin/main HEAD; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected, skipping PR creation"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Push release branch
+        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
+        run: |
+          # Retry logic for force-with-lease collisions
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if git push origin ${{ env.RELEASE_PR_BRANCH }} --force-with-lease; then
+              echo "✅ Successfully pushed release branch"
+              exit 0
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "⚠️ Push failed, fetching latest and retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                git fetch origin ${{ env.RELEASE_PR_BRANCH }} || true
+                git rebase origin/${{ env.RELEASE_PR_BRANCH }} || git reset --hard origin/${{ env.RELEASE_PR_BRANCH }}
+                sleep 2
+              else
+                echo "❌ Failed to push after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
+      
+      - name: Create or update Pull Request
+        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        id: create-pr
+        with:
+          script: |
+            const prExists = '${{ steps.pr-info.outputs.exists }}' === 'true';
+            const prNumber = '${{ steps.pr-info.outputs.number }}';
+            const version = '${{ steps.version.outputs.version }}';
+            const versionType = '${{ steps.version.outputs.type }}';
+            
+            const title = `🚀 Release v${version}`;
+            
+            // Preserve manual reviewer notes if PR exists
+            let existingBody = '';
+            let manualNotes = '';
+            if (prExists) {
+              const { data: existingPr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              existingBody = existingPr.body || '';
+              
+              // Extract manual notes section if present
+              const notesMatch = existingBody.match(/<!-- MANUAL_NOTES_START -->([\s\S]*?)<!-- MANUAL_NOTES_END -->/);
+              if (notesMatch) {
+                manualNotes = notesMatch[1];
+              }
+            }
+            
+            const autoBody = `## 🎯 Release PR: develop → main
+            
+            This PR is automatically maintained and will be updated whenever new changes land in \`develop\`.
+            
+            ### 📊 Version Information
+            - **Next Version**: \`v${version}\`
+            - **Version Type**: \`${versionType}\`
+            
+            ### ✅ Pre-merge Checklist
+            - [ ] Version has been reviewed and approved
+            - [ ] All CI checks have passed
+            - [ ] Ready for production release
+            
+            ### 🔄 Automatic Updates
+            This PR automatically:
+            - Updates when new commits are added to \`develop\`
+            - Rebases to stay current with both branches
+            - Calculates the next version based on semantic commit messages
+            - Updates version files automatically
+            
+            ### 📝 Commit Analysis
+            The version bump is based on semantic commit messages:
+            - \`feat:\` → Minor version bump
+            - \`fix:\` → Patch version bump
+            - \`BREAKING CHANGE:\` → Major version bump
+            
+            ---
+            
+            **⚠️ Manual Approval Required**: Please review and approve the version before merging.
+            
+            ${manualNotes ? `<!-- MANUAL_NOTES_START -->${manualNotes}<!-- MANUAL_NOTES_END -->` : ''}
+            
+            _This PR is automatically maintained by the Release Automation workflow._`;
+            
+            let finalPrNumber;
+            
+            if (prExists) {
+              // Update existing PR (preserve manual notes)
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                title: title,
+                body: autoBody
+              });
+              
+              finalPrNumber = prNumber;
+              console.log(`Updated PR #${prNumber}`);
+            } else {
+              // Create new PR
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: autoBody,
+                head: '${{ env.RELEASE_PR_BRANCH }}',
+                base: '${{ env.BASE_BRANCH }}',
+                maintainer_can_modify: true
+              });
+              
+              finalPrNumber = pr.number;
+              console.log(`Created PR #${pr.number}`);
+            }
+            
+            core.setOutput('number', finalPrNumber);
+      
+      - name: Get PR head SHA after push
+        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
+        id: pr-sha
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get the latest SHA from the pushed branch
+            const prNumber = '${{ steps.create-pr.outputs.number }}' || '${{ steps.pr-info.outputs.number }}';
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            // Use the latest head SHA after push
+            core.setOutput('sha', pr.head.sha);
+            return pr.head.sha;
+      
+      - name: Add version approval check
+        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ steps.create-pr.outputs.number }}' || '${{ steps.pr-info.outputs.number }}';
+            const version = '${{ steps.version.outputs.version }}';
+            const headSha = '${{ steps.pr-sha.outputs.sha }}';
+            
+            if (!headSha) {
+              core.setFailed('Could not determine PR head SHA');
+              return;
+            }
+            
+            // Check if check already exists and is successful (approved)
+            const { data: checks } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha
+            });
+            
+            const existingCheck = checks.check_runs.find(
+              check => check.name === 'Version Approval Required'
+            );
+            
+            // Only create/update if not already approved
+            if (!existingCheck || existingCheck.conclusion !== 'success') {
+              // Create or update check run - use 'in_progress' so it can be updated to success
+              if (existingCheck) {
+                await github.rest.checks.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  check_run_id: existingCheck.id,
+                  status: 'in_progress',
+                  output: {
+                    title: `Version ${version} Approval Required`,
+                    summary: `⚠️ **Manual approval required**\n\nPlease review and approve version **v${version}** before merging this release PR.\n\n**To approve:**\n1. Review the version calculation\n2. Add a comment with \`/approve-version\` or approve the PR\n3. The check will be updated automatically\n\n**Version Calculation:**\n- Based on semantic commit messages since last release\n- \`feat:\` commits → Minor version bump\n- \`fix:\` commits → Patch version bump\n- \`BREAKING CHANGE:\` → Major version bump`,
+                    text: `The next release version has been calculated as **v${version}** based on semantic commit messages.\n\nPlease verify this version is correct before merging.\n\n**Note:** This check must pass before the PR can be merged. Configure branch protection rules to require this check.`
+                  }
+                });
+              } else {
+                await github.rest.checks.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: 'Version Approval Required',
+                  head_sha: headSha,
+                  status: 'in_progress',
+                  output: {
+                    title: `Version ${version} Approval Required`,
+                    summary: `⚠️ **Manual approval required**\n\nPlease review and approve version **v${version}** before merging this release PR.\n\n**To approve:**\n1. Review the version calculation\n2. Add a comment with \`/approve-version\` or approve the PR\n3. The check will be updated automatically\n\n**Version Calculation:**\n- Based on semantic commit messages since last release\n- \`feat:\` commits → Minor version bump\n- \`fix:\` commits → Patch version bump\n- \`BREAKING CHANGE:\` → Major version bump`,
+                    text: `The next release version has been calculated as **v${version}** based on semantic commit messages.\n\nPlease verify this version is correct before merging.\n\n**Note:** This check must pass before the PR can be merged. Configure branch protection rules to require this check.`
+                  }
+                });
+              }
+            }
+            
+            // Add or update a comment on the PR (use unique identifier for better matching)
+            const commentBody = [
+              '## ⚠️ Version Approval Required',
+              '',
+              `**Next Version**: \`v${version}\``,
+              '',
+              'Please review the version calculation and approve this PR when ready to release.',
+              '',
+              '**Version Calculation:**',
+              '- Based on semantic commit messages since last release',
+              '- `feat:` commits → Minor version bump',
+              '- `fix:` commits → Patch version bump',
+              '- `BREAKING CHANGE:` → Major version bump',
+              '',
+              '**To approve:** Add a comment with `/approve-version` or simply approve the PR through the GitHub UI.',
+              '',
+              '---',
+              `<!-- RELEASE_BOT_VERSION_APPROVAL_COMMENT v${version} -->`,
+              '_This check must pass before merging. Configure branch protection to require the "Version Approval Required" check._'
+            ].join('\n');
+            
+            // Find comment by unique identifier
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            
+            const existingComment = comments.find(c => 
+              c.body.includes('RELEASE_BOT_VERSION_APPROVAL_COMMENT') &&
+              (c.user.login === 'github-actions[bot]' || c.user.type === 'Bot')
+            );
+            
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody
+              });
+            }
+      
+      - name: Summary
+        run: |
+          echo "## Release PR Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Number**: #${{ steps.create-pr.outputs.number || steps.pr-info.outputs.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next Version**: \`v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Type**: \`${{ steps.version.outputs.type }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Exists**: \`${{ steps.pr-info.outputs.exists }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The release PR has been created or updated." >> $GITHUB_STEP_SUMMARY
+
