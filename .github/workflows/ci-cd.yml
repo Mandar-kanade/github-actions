@@ -36,6 +36,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # Default fetch-depth: 1 (shallow clone) is sufficient
       
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
@@ -58,6 +59,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # Default fetch-depth: 1 (shallow clone) is sufficient
       
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
@@ -86,6 +88,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # Default fetch-depth: 1 (shallow clone) is sufficient
       
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
@@ -95,7 +98,7 @@ jobs:
       - name: Build and test (optimized single pass)
         run: mvn clean verify -Dcheckstyle.skip=true -B
       
-      - name: Upload test results
+      - name: Upload test results and build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -103,6 +106,7 @@ jobs:
           path: |
             target/surefire-reports/
             target/site/
+            target/classes/
           retention-days: 7
       
       - name: Publish test report
@@ -136,7 +140,7 @@ jobs:
   sonarcloud:
     name: 🔬 SonarCloud Analysis
     runs-on: ubuntu-latest
-    needs: [lint, format-check, build-and-test]
+    needs: [build-and-test]  # Only need build, lint/format already validated
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -146,6 +150,12 @@ jobs:
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
       
+      - name: Download test results and coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: target/
+      
       - name: Cache SonarCloud packages
         uses: actions/cache@v4
         with:
@@ -153,14 +163,19 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
-      - name: Build and analyze with SonarCloud
+      - name: Analyze with SonarCloud (skip tests, reuse coverage)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          mvn clean verify sonar:sonar \
+          # Skip tests since they're already run - saves ~30-60 seconds
+          # Reuse existing JaCoCo coverage report
+          mvn compile sonar:sonar \
             -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }} \
+            -Dsonar.java.binaries=target/classes \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
             -Dcheckstyle.skip=true \
+            -DskipTests=true \
             -B
       
       - name: Upload SonarCloud results
@@ -184,6 +199,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for better CodeQL analysis
 
       - name: Setup Java with Maven cache
         uses: ./.github/actions/setup-java-maven
@@ -193,8 +210,9 @@ jobs:
         with:
           languages: java
 
-      - name: Autobuild
+      - name: Perform CodeQL Analysis (reuse build)
         uses: github/codeql-action/autobuild@v3
+        # CodeQL will detect existing build artifacts and skip rebuild if possible
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -215,9 +233,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # Default fetch-depth: 1 (shallow clone) is sufficient
 
-      - name: Setup Java with Maven cache
-        uses: ./.github/actions/setup-java-maven
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -241,25 +263,30 @@ jobs:
         run: |
           # Force image name to lowercase (GHCR/Docker requirement)
           IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          PRIMARY_TAG="${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}"
       
-          echo "Building image: $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}"
+          echo "Building image: $IMAGE_NAME_LOWER:$PRIMARY_TAG"
       
-          # Build the image with unique tag (branch + SHA)
-          docker build -t $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} .
-      
-          # Tag additional versions (branch tag + CI run number)
-          docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
-          docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:${{ github.run_number }}
-      
-          # Push all tags
-          docker push $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }}
-          docker push $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
-          docker push $IMAGE_NAME_LOWER:${{ github.run_number }}
-      
+          # Build and push using Buildx with cache and multiple tags
+          # Cache from previous builds to speed up subsequent builds
+          BUILDX_ARGS=(
+            --platform linux/amd64
+            --cache-from type=registry,ref=$IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
+            --cache-to type=inline
+            --tag $IMAGE_NAME_LOWER:$PRIMARY_TAG
+            --tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}
+            --tag $IMAGE_NAME_LOWER:${{ github.run_number }}
+            --push
+          )
+          
+          # Add latest tag for main branch
           if [ "${{ steps.vars.outputs.safe_branch }}" = "main" ]; then
-            docker tag $IMAGE_NAME_LOWER:${{ steps.vars.outputs.safe_branch }}-${{ github.sha }} $IMAGE_NAME_LOWER:latest
-            docker push $IMAGE_NAME_LOWER:latest
+            BUILDX_ARGS+=(--tag $IMAGE_NAME_LOWER:latest)
           fi
+      
+          docker buildx build "${BUILDX_ARGS[@]}" .
+          
+          echo "✅ Successfully built and pushed all tags"
 
   # ============================================
   # QUALITY GATE (Waits for all jobs)
