@@ -91,8 +91,10 @@ jobs:
           # Make script executable
           chmod +x scripts/calculate-version.sh
           
-          # Ensure develop branch exists locally
+          # Ensure develop branch exists locally and is clean
           git checkout develop 2>/dev/null || git checkout -b develop origin/develop
+          git reset --hard origin/develop || true
+          git clean -fd || true
           git pull origin develop || true
           
           # Use the calculate-version script
@@ -139,8 +141,10 @@ jobs:
       - name: Create or recreate release branch
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
-          # Ensure we're on develop
+          # Ensure we're on develop and clean any local changes
           git checkout develop
+          git reset --hard origin/develop
+          git clean -fd
           git pull origin develop
           
           # Fetch latest main for rebasing
@@ -152,8 +156,15 @@ jobs:
             git push origin --delete ${{ env.RELEASE_PR_BRANCH }} || true
           fi
           
-          # Create fresh branch from develop
+          # Create fresh branch from develop (clean state)
           git checkout -b ${{ env.RELEASE_PR_BRANCH }} develop
+          
+          # Ensure working directory is clean before proceeding
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "⚠️ Warning: Working directory not clean, resetting..."
+            git reset --hard HEAD
+            git clean -fd
+          fi
       
       - name: Update version in pom.xml
         if: steps.check-version.outputs.skip_pr != 'true'
@@ -176,10 +187,36 @@ jobs:
           else
             git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }}"
           fi
+          
+          # Verify working directory is clean before rebase
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "❌ Error: Working directory has unstaged changes before rebase"
+            echo "Staged changes:"
+            git diff --cached || true
+            echo "Unstaged changes:"
+            git diff || true
+            exit 1
+          fi
+          
+          echo "✅ Working directory is clean, ready for rebase"
       
       - name: Rebase on main
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
+          # Verify we're on the release branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$CURRENT_BRANCH" != "${{ env.RELEASE_PR_BRANCH }}" ]; then
+            echo "❌ Error: Not on release branch. Current: $CURRENT_BRANCH"
+            exit 1
+          fi
+          
+          # Verify working directory is clean
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "❌ Error: Cannot rebase with unstaged changes"
+            git status
+            exit 1
+          fi
+          
           # Rebase on main to stay current (after committing version change)
           git rebase origin/main || {
             echo "❌ Rebase conflict detected. This requires manual resolution."
@@ -187,6 +224,8 @@ jobs:
             git rebase --abort
             exit 1
           }
+          
+          echo "✅ Successfully rebased on main"
       
       - name: Check if branch has changes
         if: steps.check-version.outputs.skip_pr != 'true'
