@@ -136,17 +136,6 @@ jobs:
         with:
           python-version: '3.x'
       
-      - name: Update version in pom.xml (before rebase)
-        if: steps.check-version.outputs.skip_pr != 'true'
-        run: |
-          # Update version before rebase to reduce conflict risk
-          VERSION="${{ steps.version.outputs.version }}"
-          python3 scripts/update-pom-version.py pom.xml "${VERSION}"
-          
-          # Verify the change
-          echo "Updated pom.xml version to: $VERSION"
-          grep -A 1 "<artifactId>product-service</artifactId>" pom.xml | grep "<version>"
-      
       - name: Create or recreate release branch
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
@@ -163,16 +152,19 @@ jobs:
             git push origin --delete ${{ env.RELEASE_PR_BRANCH }} || true
           fi
           
-          # Create fresh branch from develop with version already updated
+          # Create fresh branch from develop
           git checkout -b ${{ env.RELEASE_PR_BRANCH }} develop
+      
+      - name: Update version in pom.xml
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          # Update version on the release branch
+          VERSION="${{ steps.version.outputs.version }}"
+          python3 scripts/update-pom-version.py pom.xml "${VERSION}"
           
-          # Rebase on main to stay current
-          git rebase origin/main || {
-            echo "❌ Rebase conflict detected. This requires manual resolution."
-            echo "Please resolve conflicts in PR #${{ steps.pr-info.outputs.number }}"
-            git rebase --abort
-            exit 1
-          }
+          # Verify the change
+          echo "Updated pom.xml version to: $VERSION"
+          grep -A 1 "<artifactId>product-service</artifactId>" pom.xml | grep "<version>"
       
       - name: Commit version update
         if: steps.check-version.outputs.skip_pr != 'true'
@@ -184,6 +176,17 @@ jobs:
           else
             git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }}"
           fi
+      
+      - name: Rebase on main
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          # Rebase on main to stay current (after committing version change)
+          git rebase origin/main || {
+            echo "❌ Rebase conflict detected. This requires manual resolution."
+            echo "Please resolve conflicts in PR #${{ steps.pr-info.outputs.number }}"
+            git rebase --abort
+            exit 1
+          }
       
       - name: Check if branch has changes
         if: steps.check-version.outputs.skip_pr != 'true'
