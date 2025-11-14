@@ -26,6 +26,9 @@ permissions:
   checks: write
   issues: write
 
+# Note: Repository must have "Allow GitHub Actions to create and approve pull requests" enabled
+# Settings → Actions → General → Workflow permissions → Read and write permissions
+
 env:
   MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.count=3
   RELEASE_PR_BRANCH: release/develop-to-main
@@ -346,18 +349,28 @@ jobs:
               console.log(`Updated PR #${prNumber}`);
             } else {
               // Create new PR
-              const { data: pr } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: title,
-                body: autoBody,
-                head: '${{ env.RELEASE_PR_BRANCH }}',
-                base: '${{ env.BASE_BRANCH }}',
-                maintainer_can_modify: true
-              });
-              
-              finalPrNumber = pr.number;
-              console.log(`Created PR #${pr.number}`);
+              try {
+                const { data: pr } = await github.rest.pulls.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: title,
+                  body: autoBody,
+                  head: '${{ env.RELEASE_PR_BRANCH }}',
+                  base: '${{ env.BASE_BRANCH }}',
+                  maintainer_can_modify: true
+                });
+                
+                finalPrNumber = pr.number;
+                console.log(`Created PR #${pr.number}`);
+              } catch (error) {
+                if (error.status === 403 && error.message && error.message.includes('not permitted to create')) {
+                  core.setFailed(`❌ GitHub Actions cannot create pull requests. Please enable "Allow GitHub Actions to create and approve pull requests" in repository settings:\n` +
+                    `Settings → Actions → General → Workflow permissions → Read and write permissions\n` +
+                    `Or manually create PR from branch: ${{ env.RELEASE_PR_BRANCH }} → ${{ env.BASE_BRANCH }}`);
+                  throw error;
+                }
+                throw error;
+              }
             }
             
             core.setOutput('number', finalPrNumber);
