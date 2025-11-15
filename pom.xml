@@ -29,6 +29,10 @@
         <maven-formatter-plugin.version>2.29.0</maven-formatter-plugin.version>
         <sonar-maven-plugin.version>3.11.0.3922</sonar-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.14</jacoco-maven-plugin.version>
+        <owasp-dependency-check.version>9.0.9</owasp-dependency-check.version>
+        <license-maven-plugin.version>5.0.0</license-maven-plugin.version>
+        <spotbugs-maven-plugin.version>4.9.8.1</spotbugs-maven-plugin.version>
+        <findsecbugs-plugin.version>1.13.0</findsecbugs-plugin.version>
         <sonar.organization>mandar-kanade</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     </properties>
@@ -169,6 +173,72 @@
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>
                 <version>${sonar-maven-plugin.version}</version>
+            </plugin>
+
+            <!-- OWASP Dependency-Check Plugin for Vulnerability Scanning -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>${owasp-dependency-check.version}</version>
+                <configuration>
+                    <failBuildOnCVSS>7.0</failBuildOnCVSS>
+                    <format>ALL</format>
+                    <skipProvidedScope>false</skipProvidedScope>
+                    <skipRuntimeScope>false</skipRuntimeScope>
+                    <skipTestScope>false</skipTestScope>
+                    <!-- NVD API Configuration: Set to true if you have an API key -->
+                    <!-- Get free API key at: https://nvd.nist.gov/developers/request-an-api-key -->
+                    <nvdApiKey>${nvd.api.key}</nvdApiKey>
+                    <nvdApiDelay>6000</nvdApiDelay>
+                    <!-- Auto-update: Set to false to use cached data only -->
+                    <autoUpdate>true</autoUpdate>
+                    <!-- Data directory: Uses cached data from GitHub Actions cache -->
+                    <dataDirectory>${user.home}/.dependency-check/data</dataDirectory>
+                </configuration>
+            </plugin>
+
+            <!-- License Maven Plugin for License Compliance -->
+            <plugin>
+                <groupId>com.mycila</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>${license-maven-plugin.version}</version>
+                <configuration>
+                    <strictCheck>false</strictCheck>
+                    <failIfMissing>false</failIfMissing>
+                    <includes>
+                        <include>**/*.java</include>
+                        <include>**/*.xml</include>
+                        <include>**/*.properties</include>
+                    </includes>
+                    <excludes>
+                        <exclude>**/target/**</exclude>
+                        <exclude>**/.git/**</exclude>
+                        <exclude>**/.idea/**</exclude>
+                        <exclude>**/.vscode/**</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- SpotBugs Plugin with FindSecBugs for SAST Analysis -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs-maven-plugin.version}</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Low</threshold>
+                    <xmlOutput>true</xmlOutput>
+                    <htmlOutput>true</htmlOutput>
+                    <spotbugsXmlOutput>true</spotbugsXmlOutput>
+                </configuration>
+                <dependencies>
+                    <!-- FindSecBugs Plugin for Security-focused Analysis -->
+                    <dependency>
+                        <groupId>com.h3xstream.findsecbugs</groupId>
+                        <artifactId>findsecbugs-plugin</artifactId>
+                        <version>${findsecbugs-plugin.version}</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

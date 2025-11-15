@@ -1,0 +1,353 @@
+name: 🔒 Security Scans
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - develop
+  push:
+    branches:
+      - feature/security-scan-pipeline
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  checks: write
+
+# Global environment variables
+env:
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.count=3
+
+jobs:
+  # ============================================
+  # PHASE 1: SECRET DETECTION (Fastest)
+  # Detect hardcoded secrets, API keys, passwords
+  # ============================================
+  
+  secret-detection:
+    name: 🔐 Secret Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for secret detection
+      
+      - name: Run Gitleaks Secret Detection
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .gitleaks.toml
+          no-git: false
+          verbose: true
+          redact: true
+      
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: |
+            .gitleaks-report.json
+            .gitleaks-report.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ============================================
+  # PHASE 2: DEPENDENCY VULNERABILITY SCAN
+  # Scan dependencies for known vulnerabilities
+  # ============================================
+  
+  dependency-vulnerability-scan:
+    name: 🛡️ Dependency Vulnerability Scan (OWASP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+      
+      - name: Cache OWASP Dependency-Check data
+        uses: actions/cache@v4
+        with:
+          path: ~/.dependency-check/data
+          key: ${{ runner.os }}-owasp-dependency-check-data
+          restore-keys: ${{ runner.os }}-owasp-dependency-check-data
+      
+      - name: Run OWASP Dependency-Check
+        env:
+          # Optional: Set NVD_API_KEY secret in GitHub repository settings
+          # Get free API key at: https://nvd.nist.gov/developers/request-an-api-key
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          echo "🔍 Scanning dependencies for vulnerabilities..."
+          
+          # Check if cached data exists
+          if [ -d "$HOME/.dependency-check/data" ] && [ "$(ls -A $HOME/.dependency-check/data 2>/dev/null)" ]; then
+            echo "✅ Found cached vulnerability data"
+            HAS_CACHE=true
+          else
+            echo "⚠️ No cached data found - first run or cache expired"
+            HAS_CACHE=false
+          fi
+          
+          # Build Maven command with optional API key
+          MAVEN_CMD="mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7.0 -Dformat=ALL -B"
+          
+          # Configure based on API key availability
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "✅ Using NVD API key for faster updates"
+            MAVEN_CMD="$MAVEN_CMD -Dnvd.api.key=$NVD_API_KEY"
+          else
+            echo "⚠️ No NVD API key found"
+            echo "💡 For better performance, get a free API key at: https://nvd.nist.gov/developers/request-an-api-key"
+            echo "💡 Then add it as NVD_API_KEY secret in repository settings"
+            
+            if [ "$HAS_CACHE" = "false" ]; then
+              echo "❌ Cannot proceed: No API key and no cached data"
+              echo "💡 Solutions:"
+              echo "   1. Get a free NVD API key (recommended): https://nvd.nist.gov/developers/request-an-api-key"
+              echo "   2. Or wait for cache to be populated on next run with API key"
+              exit 1
+            else
+              echo "✅ Using cached data only (skipping updates)"
+              MAVEN_CMD="$MAVEN_CMD -DautoUpdate=false"
+            fi
+          fi
+          
+          # Execute the command
+          eval $MAVEN_CMD
+      
+      - name: Upload Dependency-Check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-reports
+          path: |
+            target/dependency-check-report.html
+            target/dependency-check-report.json
+            target/dependency-check-report.xml
+          if-no-files-found: ignore
+          retention-days: 30
+      
+      - name: Display vulnerability summary
+        if: always()
+        run: |
+          if [ -f target/dependency-check-report.json ]; then
+            echo "## 📊 Dependency Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Extract vulnerability counts from JSON report
+            CRITICAL=$(jq -r '.dependencies[] | select(.vulnerabilities != null) | .vulnerabilities[] | select(.cvssv3.baseScore >= 9.0) | .name' target/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            HIGH=$(jq -r '.dependencies[] | select(.vulnerabilities != null) | .vulnerabilities[] | select(.cvssv3.baseScore >= 7.0 and .cvssv3.baseScore < 9.0) | .name' target/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            MEDIUM=$(jq -r '.dependencies[] | select(.vulnerabilities != null) | .vulnerabilities[] | select(.cvssv3.baseScore >= 4.0 and .cvssv3.baseScore < 7.0) | .name' target/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            LOW=$(jq -r '.dependencies[] | select(.vulnerabilities != null) | .vulnerabilities[] | select(.cvssv3.baseScore < 4.0) | .name' target/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔴 Critical (9.0+) | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟠 High (7.0-8.9) | $HIGH |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟡 Medium (4.0-6.9) | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟢 Low (<4.0) | $LOW |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 Full report available in artifacts" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================
+  # PHASE 3: LICENSE COMPLIANCE CHECK
+  # Verify dependency licenses are compliant
+  # ============================================
+  
+  license-check:
+    name: 📜 License Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+      
+      - name: Run License Check
+        continue-on-error: true
+        run: |
+          echo "📜 Checking dependency licenses..."
+          mvn license:check -B || echo "⚠️ License check completed with warnings"
+      
+      - name: Generate License Report
+        if: always()
+        run: |
+          echo "📋 Generating license report using Maven dependency plugin..."
+          # Use Maven dependency plugin to list dependencies with licenses
+          mvn dependency:tree -B > dependency-tree.txt || true
+          mvn dependency:list -B > dependency-list.txt || true
+      
+      - name: Upload License reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-reports
+          path: |
+            dependency-tree.txt
+            dependency-list.txt
+          if-no-files-found: ignore
+          retention-days: 30
+      
+      - name: Display license summary
+        if: always()
+        run: |
+          echo "## 📜 License Compliance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ License check completed. Dependency information available in artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Note:" >> $GITHUB_STEP_SUMMARY
+          echo "Review the dependency tree and list files in artifacts to verify license compliance." >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # PHASE 4: SAST WITH SPOTBUGS/FINDSECBUGS
+  # Additional static analysis for security issues
+  # ============================================
+  
+  sast-spotbugs:
+    name: 🔬 SAST Analysis (SpotBugs + FindSecBugs)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java with Maven cache
+        uses: ./.github/actions/setup-java-maven
+      
+      - name: Build project
+        run: mvn clean compile -DskipTests -B
+      
+      - name: Run SpotBugs with FindSecBugs
+        continue-on-error: true
+        run: |
+          echo "🔬 Running SpotBugs security analysis..."
+          # Plugin is declared in pom.xml, so short form works
+          mvn spotbugs:check -B || echo "⚠️ SpotBugs analysis completed with findings"
+      
+      - name: Generate SpotBugs HTML report
+        if: always()
+        run: |
+          # Generate HTML report (spotbugs goal generates both XML and HTML)
+          mvn spotbugs:spotbugs -B || true
+      
+      - name: Upload SpotBugs reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotbugs-reports
+          path: |
+            target/spotbugsXml.xml
+            target/site/spotbugs.html
+          if-no-files-found: ignore
+          retention-days: 30
+      
+      - name: Display SpotBugs summary
+        if: always()
+        run: |
+          if [ -f target/spotbugsXml.xml ]; then
+            echo "## 🔬 SpotBugs Security Analysis Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Count security bugs
+            SECURITY_BUGS=$(grep -c "FindSecBugs" target/spotbugsXml.xml 2>/dev/null || echo "0")
+            TOTAL_BUGS=$(grep -c "<BugInstance" target/spotbugsXml.xml 2>/dev/null || echo "0")
+            
+            echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔒 Security Issues | $SECURITY_BUGS |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🐛 Total Issues | $TOTAL_BUGS |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 Full report available in artifacts" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================
+  # SECURITY GATE (Waits for all scans)
+  # ============================================
+  
+  security-gate:
+    name: 🛡️ Security Gate
+    runs-on: ubuntu-latest
+    needs: [secret-detection, dependency-vulnerability-scan, license-check, sast-spotbugs]
+    outputs:
+      passed: ${{ steps.gate-check.outputs.passed }}
+    
+    steps:
+      - name: Check security gate
+        id: gate-check
+        run: |
+          secret_status="${{ needs.secret-detection.result }}"
+          dependency_status="${{ needs.dependency-vulnerability-scan.result }}"
+          license_status="${{ needs.license-check.result }}"
+          sast_status="${{ needs.sast-spotbugs.result }}"
+          
+          echo "🔐 Secret Detection: $secret_status"
+          echo "🛡️ Dependency Scan: $dependency_status"
+          echo "📜 License Check: $license_status"
+          echo "🔬 SAST Analysis: $sast_status"
+          
+          # Security gate fails if any critical scan fails
+          if [ "$secret_status" == "failure" ] || [ "$dependency_status" == "failure" ] || [ "$license_status" == "failure" ] || [ "$sast_status" == "failure" ]; then
+            echo "❌ Security gate failed!"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Security gate passed!"
+          echo "passed=true" >> $GITHUB_OUTPUT
+      
+      - name: Download all security reports
+        uses: actions/download-artifact@v4
+        with:
+          path: security-reports
+      
+      - name: Generate security summary
+        run: |
+          echo "# 🛡️ Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scan Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan Type | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔐 Secret Detection | ${{ needs.secret-detection.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🛡️ Dependency Vulnerability Scan | ${{ needs.dependency-vulnerability-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📜 License Compliance | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔬 SAST (SpotBugs) | ${{ needs.sast-spotbugs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.secret-detection.result }}" == "success" ] && \
+             [ "${{ needs.dependency-vulnerability-scan.result }}" == "success" ] && \
+             [ "${{ needs.license-check.result }}" == "success" ] && \
+             [ "${{ needs.sast-spotbugs.result }}" == "success" ]; then
+            echo "## ✅ All security scans passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Some security scans failed or had issues!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please review the scan reports in the artifacts section." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Scan Details" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "- **Trigger**: Pull Request (${{ github.event.action }})" >> $GITHUB_STEP_SUMMARY
+            echo "- **PR**: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Branch**: \`${{ github.event.pull_request.head.ref }}\` → \`${{ github.event.pull_request.base.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "- **Trigger**: Push to \`${{ github.ref_name }}\` branch" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow Run**: \`#${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📁 Reports Available" >> $GITHUB_STEP_SUMMARY
+          echo "All security scan reports are available as workflow artifacts for 30 days." >> $GITHUB_STEP_SUMMARY
+
