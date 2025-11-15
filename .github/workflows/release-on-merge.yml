@@ -18,7 +18,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && github.event.pull_request.base.ref == 'main'
     
     steps:
       - name: Checkout code
@@ -146,12 +146,57 @@ jobs:
         with:
           python-version: '3.x'
       
-      - name: Update develop branch version
+      - name: Sync develop with main and update version
         run: |
+          # After merging release branch PR to main, main now has:
+          # - All commits from develop (release branch was rebased on develop)
+          # - Version bump commit from release branch
+          #
+          # We need to:
+          # 1. Sync develop with main (so develop has all commits from main, except version)
+          # 2. Update develop with next snapshot version
+          
           git checkout develop
           git pull origin develop
           
-          # Update version to next snapshot
+          # Fetch latest main to ensure we have the merged state
+          git fetch origin main
+          
+          # Check if develop is behind main (should be the case right after merge)
+          DEVELOP_COMMIT=$(git rev-parse HEAD)
+          MAIN_COMMIT=$(git rev-parse origin/main)
+          
+          if [ "$DEVELOP_COMMIT" != "$MAIN_COMMIT" ]; then
+            # Develop might have new commits after release branch was created, or might be behind
+            # Since release branch was rebased on develop, main should have all develop commits
+            # Fast-forward develop to main if possible, otherwise merge
+            if git merge-base --is-ancestor origin/main HEAD; then
+              # Develop is ahead of main (has new commits after release branch was created)
+              # Merge main into develop to sync
+              echo "Develop has new commits, merging main into develop..."
+              git merge origin/main --no-edit || {
+                echo "⚠️ Merge conflict detected. Resolving by accepting main's version for pom.xml..."
+                git checkout --theirs pom.xml || true
+                git add pom.xml
+                git commit -m "chore: sync with main after release" || true
+              }
+            else
+              # Develop is behind main, fast-forward
+              echo "Fast-forwarding develop to main..."
+              git merge --ff-only origin/main || {
+                echo "Cannot fast-forward, performing merge..."
+                git merge origin/main --no-edit || {
+                  echo "⚠️ Merge conflict. Resetting develop to match main..."
+                  git reset --hard origin/main
+                }
+              }
+            fi
+          else
+            echo "✅ Develop and main are already in sync"
+          fi
+          
+          # Now update version to next snapshot on develop
+          # This ensures develop is ready for the next release cycle
           VERSION="${{ steps.version.outputs.version }}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           NEXT_PATCH=$((PATCH + 1))
@@ -164,9 +209,13 @@ jobs:
           if ! git diff --staged --quiet; then
             git commit -m "chore: bump version to ${NEXT_SNAPSHOT} after release"
             git push origin develop
+            echo "✅ Updated develop with next snapshot version: ${NEXT_SNAPSHOT}"
           else
             echo "No version changes to commit"
           fi
+          
+          # Verify develop and main are in sync (except for version)
+          echo "✅ Develop and main are now in sync (develop has next snapshot version for next release cycle)"
       
       - name: Release Summary
         run: |

@@ -141,7 +141,7 @@ jobs:
         with:
           python-version: '3.x'
       
-      - name: Create or recreate release branch
+      - name: Ensure develop branch is clean and up to date
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
           # Ensure we're on develop and clean any local changes
@@ -150,17 +150,8 @@ jobs:
           git clean -fd
           git pull origin develop
           
-          # Fetch latest main for rebasing
+          # Fetch latest main for comparison
           git fetch origin main
-          
-          # Delete existing release branch if it exists (to avoid merge commits)
-          if git show-ref --verify --quiet refs/heads/${{ env.RELEASE_PR_BRANCH }}; then
-            git branch -D ${{ env.RELEASE_PR_BRANCH }} || true
-            git push origin --delete ${{ env.RELEASE_PR_BRANCH }} || true
-          fi
-          
-          # Create fresh branch from develop (clean state)
-          git checkout -b ${{ env.RELEASE_PR_BRANCH }} develop
           
           # Ensure working directory is clean before proceeding
           if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -169,31 +160,84 @@ jobs:
             git clean -fd
           fi
       
-      - name: Update version in pom.xml
+      - name: Create or update release branch from develop
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
-          # Update version on the release branch
+          # Ensure we're on develop
+          git checkout develop
+          git reset --hard origin/develop
+          git pull origin develop
+          
+          # Check if release branch exists
+          if git show-ref --verify --quiet refs/heads/${{ env.RELEASE_PR_BRANCH }}; then
+            echo "Release branch exists, checking it out and rebasing on develop"
+            git checkout ${{ env.RELEASE_PR_BRANCH }}
+            git reset --hard origin/${{ env.RELEASE_PR_BRANCH }} || git reset --hard develop
+          else
+            echo "Release branch doesn't exist, creating from develop"
+            git checkout -b ${{ env.RELEASE_PR_BRANCH }} develop
+          fi
+          
+          # Always rebase release branch on develop to keep it in sync
+          # This ensures all commits from develop are included in release branch
+          echo "Rebasing release branch on develop to stay in sync..."
+          git rebase develop || {
+            echo "⚠️ Rebase conflict detected. This should be rare."
+            echo "Attempting to resolve by accepting develop's version..."
+            git rebase --abort || true
+            # If rebase fails, reset release branch to match develop
+            git reset --hard develop
+          }
+          
+          # Verify we're on release branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$CURRENT_BRANCH" != "${{ env.RELEASE_PR_BRANCH }}" ]; then
+            echo "❌ Error: Not on release branch. Current: $CURRENT_BRANCH"
+            exit 1
+          fi
+          
+          echo "✅ Release branch is up to date with develop"
+      
+      - name: Update version in pom.xml on release branch
+        if: steps.check-version.outputs.skip_pr != 'true'
+        run: |
+          # Verify we're on release branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$CURRENT_BRANCH" != "${{ env.RELEASE_PR_BRANCH }}" ]; then
+            echo "❌ Error: Not on release branch. Current: $CURRENT_BRANCH"
+            exit 1
+          fi
+          
+          # Update version on release branch (not develop)
           VERSION="${{ steps.version.outputs.version }}"
           python3 scripts/update-pom-version.py pom.xml "${VERSION}"
           
           # Verify the change
-          echo "Updated pom.xml version to: $VERSION"
+          echo "Updated pom.xml version to: $VERSION on release branch"
           grep -A 1 "<artifactId>product-service</artifactId>" pom.xml | grep "<version>"
       
-      - name: Commit version update
+      - name: Commit version update to release branch
         if: steps.check-version.outputs.skip_pr != 'true'
         run: |
+          # Verify we're on release branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$CURRENT_BRANCH" != "${{ env.RELEASE_PR_BRANCH }}" ]; then
+            echo "❌ Error: Not on release branch. Current: $CURRENT_BRANCH"
+            exit 1
+          fi
+          
           git add pom.xml
           
           if git diff --staged --quiet; then
-            echo "No version changes to commit"
+            echo "No version changes to commit (version already set)"
           else
             git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }}"
+            echo "✅ Committed version bump to release branch"
           fi
           
-          # Verify working directory is clean before rebase
+          # Verify working directory is clean
           if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "❌ Error: Working directory has unstaged changes before rebase"
+            echo "❌ Error: Working directory has unstaged changes"
             echo "Staged changes:"
             git diff --cached || true
             echo "Unstaged changes:"
@@ -201,51 +245,32 @@ jobs:
             exit 1
           fi
           
-          echo "✅ Working directory is clean, ready for rebase"
+          echo "✅ Working directory is clean"
       
-      - name: Rebase on main
+      - name: Check if release branch has changes compared to main
         if: steps.check-version.outputs.skip_pr != 'true'
+        id: check-changes
         run: |
-          # Verify we're on the release branch
+          # Check if release branch differs from main
+          git fetch origin main
+          if git diff --quiet origin/main HEAD; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected between release branch and main, skipping PR creation"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ Changes detected between release branch and main"
+          fi
+      
+      - name: Push release branch
+        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
+        run: |
+          # Verify we're on release branch
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           if [ "$CURRENT_BRANCH" != "${{ env.RELEASE_PR_BRANCH }}" ]; then
             echo "❌ Error: Not on release branch. Current: $CURRENT_BRANCH"
             exit 1
           fi
           
-          # Verify working directory is clean
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "❌ Error: Cannot rebase with unstaged changes"
-            git status
-            exit 1
-          fi
-          
-          # Rebase on main to stay current (after committing version change)
-          git rebase origin/main || {
-            echo "❌ Rebase conflict detected. This requires manual resolution."
-            echo "Please resolve conflicts in PR #${{ steps.pr-info.outputs.number }}"
-            git rebase --abort
-            exit 1
-          }
-          
-          echo "✅ Successfully rebased on main"
-      
-      - name: Check if branch has changes
-        if: steps.check-version.outputs.skip_pr != 'true'
-        id: check-changes
-        run: |
-          # Check if branch differs from main
-          git fetch origin main
-          if git diff --quiet origin/main HEAD; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "No changes detected, skipping PR creation"
-          else
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Push release branch
-        if: steps.check-version.outputs.skip_pr != 'true' && steps.check-changes.outputs.has_changes == 'true'
-        run: |
           # Retry logic for force-with-lease collisions
           MAX_RETRIES=3
           RETRY_COUNT=0
@@ -259,7 +284,9 @@ jobs:
               if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
                 echo "⚠️ Push failed, fetching latest and retrying ($RETRY_COUNT/$MAX_RETRIES)..."
                 git fetch origin ${{ env.RELEASE_PR_BRANCH }} || true
-                git rebase origin/${{ env.RELEASE_PR_BRANCH }} || git reset --hard origin/${{ env.RELEASE_PR_BRANCH }}
+                git fetch origin develop
+                # Rebase again on latest develop before retrying
+                git rebase origin/develop || git reset --hard origin/develop
                 sleep 2
               else
                 echo "❌ Failed to push after $MAX_RETRIES attempts"
@@ -315,9 +342,10 @@ jobs:
             ### 🔄 Automatic Updates
             This PR automatically:
             - Updates when new commits are added to \`develop\`
-            - Rebases to stay current with both branches
+            - Rebases release branch on \`develop\` to stay in sync
             - Calculates the next version based on semantic commit messages
-            - Updates version files automatically
+            - Updates version files automatically on release branch
+            - Keeps \`develop\` clean (no version bump commits)
             
             ### 📝 Commit Analysis
             The version bump is based on semantic commit messages:
