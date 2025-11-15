@@ -10,6 +10,7 @@ permissions:
   contents: write
   pull-requests: write
   packages: write
+  actions: read
 
 env:
   MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.count=3
@@ -33,9 +34,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
       
-      - name: Setup Java with Maven cache
-        uses: ./.github/actions/setup-java-maven
-      
       - name: Extract version from pom.xml
         id: version
         run: |
@@ -51,6 +49,98 @@ jobs:
             echo "Error: Could not extract version from pom.xml"
             exit 1
           fi
+      
+      - name: Get merge commit SHA
+        id: merge_commit
+        run: |
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          echo "merge_sha=$MERGE_SHA" >> $GITHUB_OUTPUT
+          echo "Merge commit SHA: $MERGE_SHA"
+      
+      - name: Find CI/CD workflow run
+        id: find_workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const mergeSha = '${{ steps.merge_commit.outputs.merge_sha }}';
+            const workflowName = 'Java Product Service CI/CD';
+            
+            // Find the workflow run for the merge commit
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci-cd.yml',
+              head_sha: mergeSha,
+              per_page: 1
+            });
+            
+            if (runs.workflow_runs.length === 0) {
+              throw new Error(`No workflow run found for commit ${mergeSha}`);
+            }
+            
+            const workflowRun = runs.workflow_runs[0];
+            console.log(`Found workflow run: ${workflowRun.id} (${workflowRun.status})`);
+            
+            // Wait for workflow to complete if still running
+            let run = workflowRun;
+            let attempts = 0;
+            const maxAttempts = 60; // Wait up to 10 minutes (60 * 10s)
+            
+            while (run.status !== 'completed' && attempts < maxAttempts) {
+              console.log(`Workflow run ${run.id} status: ${run.status}, waiting...`);
+              await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+              
+              const { data: updatedRun } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              run = updatedRun;
+              attempts++;
+            }
+            
+            if (run.status !== 'completed') {
+              throw new Error(`Workflow run ${run.id} did not complete in time. Status: ${run.status}`);
+            }
+            
+            if (run.conclusion !== 'success') {
+              throw new Error(`Workflow run ${run.id} did not succeed. Conclusion: ${run.conclusion}`);
+            }
+            
+            core.setOutput('workflow_run_id', run.id);
+            core.setOutput('workflow_run_url', run.html_url);
+      
+      - name: Download JAR artifact from CI/CD workflow
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: ci-cd.yml
+          commit: ${{ steps.merge_commit.outputs.merge_sha }}
+          name: product-service-jar
+          path: target
+          if_no_artifact_found: fail
+      
+      - name: Prepare JAR file for release
+        id: prepare_jar
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Find the JAR file in target directory
+          JAR_FILE=$(find target -name "product-service-*.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" | head -1)
+          
+          if [ -z "$JAR_FILE" ]; then
+            echo "Error: JAR file not found in target directory"
+            exit 1
+          fi
+          
+          # Rename to match release version if needed
+          RELEASE_JAR="target/product-service-${VERSION}.jar"
+          if [ "$JAR_FILE" != "$RELEASE_JAR" ]; then
+            cp "$JAR_FILE" "$RELEASE_JAR"
+            echo "Copied JAR to: $RELEASE_JAR"
+          fi
+          
+          echo "jar_path=$RELEASE_JAR" >> $GITHUB_OUTPUT
+          ls -lh "$RELEASE_JAR"
       
       - name: Get changelog
         id: changelog
@@ -82,16 +172,47 @@ jobs:
           
           echo "Created tag: $TAG"
       
-      - name: Build release artifacts
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Tag and push Docker image with release version
         run: |
-          mvn clean package -DskipTests -B
+          REGISTRY="ghcr.io"
+          IMAGE_NAME="${{ github.repository_owner }}/${{ github.event.repository.name }}"
+          IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          VERSION="${{ steps.version.outputs.version }}"
+          MERGE_SHA="${{ steps.merge_commit.outputs.merge_sha }}"
+          
+          # The image was already built in ci-cd.yml with tag: main-{sha}
+          SOURCE_TAG="main-${MERGE_SHA}"
+          RELEASE_TAG="v${VERSION}"
+          
+          echo "Pulling existing Docker image: ${IMAGE_NAME_LOWER}:${SOURCE_TAG}"
+          
+          # Pull the existing image
+          docker pull ${IMAGE_NAME_LOWER}:${SOURCE_TAG}
+          
+          # Tag it with release version
+          docker tag ${IMAGE_NAME_LOWER}:${SOURCE_TAG} ${IMAGE_NAME_LOWER}:${RELEASE_TAG}
+          docker tag ${IMAGE_NAME_LOWER}:${SOURCE_TAG} ${IMAGE_NAME_LOWER}:latest
+          
+          # Push the release tags
+          docker push ${IMAGE_NAME_LOWER}:${RELEASE_TAG}
+          docker push ${IMAGE_NAME_LOWER}:latest
+          
+          echo "✅ Tagged and pushed Docker image: ${IMAGE_NAME_LOWER}:${RELEASE_TAG}"
+          echo "✅ Updated latest tag: ${IMAGE_NAME_LOWER}:latest"
       
       - name: Create GitHub Release and Upload Artifacts
         id: create-release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            target/product-service-${{ steps.version.outputs.version }}.jar
+            ${{ steps.prepare_jar.outputs.jar_path }}
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           body: |
@@ -110,36 +231,14 @@ jobs:
             ```bash
             docker pull ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:v${{ steps.version.outputs.version }}
             ```
+            
+            ### Build Information
+            - **Commit**: `${{ steps.merge_commit.outputs.merge_sha }}`
+            - **CI/CD Workflow**: [${{ steps.find_workflow.outputs.workflow_run_id }}](${{ steps.find_workflow.outputs.workflow_run_url }})
+            - **Artifacts**: Reused from CI/CD pipeline (no rebuild)
           draft: false
           prerelease: false
           generate_release_notes: false
-      
-      - name: Build and push Docker image with release tag
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Build and push Docker image
-        run: |
-          REGISTRY="ghcr.io"
-          IMAGE_NAME="${{ github.repository_owner }}/${{ github.event.repository.name }}"
-          IMAGE_NAME_LOWER=$(echo "$REGISTRY/$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          
-          docker buildx build \
-            --platform linux/amd64 \
-            --tag ${IMAGE_NAME_LOWER}:${TAG} \
-            --tag ${IMAGE_NAME_LOWER}:latest \
-            --push \
-            .
-          
-          echo "✅ Pushed Docker image: ${IMAGE_NAME_LOWER}:${TAG}"
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -175,10 +274,12 @@ jobs:
           echo "- **Version**: \`v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: \`v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Release**: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ steps.merge_commit.outputs.merge_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI/CD Workflow**: [${{ steps.find_workflow.outputs.workflow_run_id }}](${{ steps.find_workflow.outputs.workflow_run_url }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- JAR: \`product-service-${{ steps.version.outputs.version }}.jar\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Docker: \`ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts (Reused from CI/CD)" >> $GITHUB_STEP_SUMMARY
+          echo "- **JAR**: \`product-service-${{ steps.version.outputs.version }}.jar\` (from CI/CD workflow)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker**: \`ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:v${{ steps.version.outputs.version }}\` (tagged from \`main-${{ steps.merge_commit.outputs.merge_sha }}\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Changelog" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
